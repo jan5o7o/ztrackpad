@@ -21,8 +21,9 @@ are reading this in the generated copy, open an issue rather than a pull request
 In the development repo, **read `PUBLISHING.md` before any work that ends in a public
 deployment**: it covers the local `public` branch, the three trees, the `ztrackpad-sync`
 guards (dirty worktree, private-string leak scan, generated-path pre-flight), the
-invariants (no secret in a tracked file, rebranding only ever happens on `public`) and the
-merge-never-rebase trap. `PUBLISHING.md` is private-only and is excluded from the export,
+invariants (no secret in a tracked file, rebranding only ever happens on `public`), the
+merge-never-rebase trap, and the runbook for pulling something back out of a public history
+that already has it. `PUBLISHING.md` is private-only and is excluded from the export,
 so it is absent from the generated tree by design.
 
 ## What an agent cannot do here

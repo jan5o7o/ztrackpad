@@ -5,10 +5,33 @@ picker / virtual display** for Android — built entirely on the phone with a ha
 Termux toolchain: no SDK install and no Gradle. The build downloads only the platform
 jar it compiles against.
 
+## The problem it was built for
+
+One workflow, on one device: **an agent harness running in Termux, with a browser beside it
+to debug what the agent wrote.** On a desktop that is two windows and a keyboard. On a phone
+it is three dead ends:
+
+- **Nothing to point with.** A touchscreen has no hover and no precise drag, so a browser's
+  devtools, its tab strip or a small `✕` are finger-sized guesses — and the tabs you actually
+  want are up in Termux's tab strip, a trip away from the keys you are typing on.
+- **The keys an agent runs on are not on the keyboard.** `Esc` to interrupt, `Ctrl+C` to kill a
+  run, `Tab` to complete a path, `Ctrl+B` for tmux, arrows to move through an editor,
+  `PageUp`/`PageDown` to read scrollback: Android's soft keyboard has none of them. The panel's
+  rows are laid out like Termux's extra-keys rows, for the same reason, and the layout is a
+  string you can replace at runtime.
+- **No room for both.** Debugging means the browser and the terminal side by side, and a split
+  divider is a hairline to hit while a soft keyboard is up.
+
+The three answers: a drawn pointer injected as a real `SOURCE_MOUSE`, a keys panel you can
+redefine, and a display picker that aims the pointer at another screen — or at a virtual
+display the app creates for itself.
+
 It was built and driven on a **Galaxy Z Fold 4** (SM-F936B, Android 16, aarch64), in
 Termux, with no desktop in the loop — and that is the point: a phone with a package
 manager is a complete build host for this app. Nothing in the build reads a device model,
 so any machine with the tools in [Prerequisites](#prerequisites) should do the same.
+
+## The controls
 
 Two floating dots, and four controls docked inside the pad:
 - **`●` (right, default)** — toggles the trackpad
@@ -22,17 +45,10 @@ Two floating dots, and four controls docked inside the pad:
 - **`↑` `↓`** — round buttons on the pad's left edge that nudge the split-screen divider,
   one 8% step per press. `↑` grows the bottom pane, `↓` shrinks it.
 
-## The use case: a foldable, unfolded
+## A foldable, unfolded
 
-An unfolded Fold is a small desktop with no pointer. That is the gap this fills, and the
-reason the pad exists at all:
+The controls above exist because of the shape of the device, not in spite of it:
 
-- **The pointer is the point.** A touchscreen has no hover and no precise drag, and a
-  foldable's inner display never shows a cursor. The pad supplies one — drawn, and injected
-  as a real `SOURCE_MOUSE` — so hover, click and window drag behave the way a laptop's do.
-- **The keys panel covers what a soft keyboard cannot**: `Esc`, `Tab`, `Ctrl`/`Alt`/`Shift`
-  combinations, `PageUp`/`PageDown`, arrows, `Ctrl+B` for tmux — laid out like Termux's
-  extra-keys rows, for the same reason.
 - **Click-through keeps the big screen usable.** The pad can cover the corner of an app and
   still click the thing underneath it, which is the difference between a trackpad and an
   obstruction. Measured in split screen, not just designed that way.
