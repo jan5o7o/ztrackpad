@@ -91,7 +91,7 @@ build string, and the window is cut rather than blurred.** Each recording here h
 `demo-browser.mp4` loses 27–32.8s, `demo-termux.mp4` loses 57.5s to the end, and
 `demo-vdisplay.mp4` loses 50–56s. In the first and third the address bar's suggestion list is
 drawn from browser history, so it republished whatever hosts that history held — the lists in
-both named private ones. The Termux one is the sharper lesson: the rule against the kernel string
+both named private ones. The Termux case was worse: the rule against the kernel string
 was already written on this page, and the published recording broke it anyway, because the rule
 had been applied to the screenshots and to the GIF cut windows and never to the footage between
 them.

@@ -7,24 +7,22 @@ jar it compiles against.
 
 ## The problem it was built for
 
-One workflow, on one device: **an agent harness running in Termux, with a browser beside it
-to debug what the agent wrote.** On a desktop that is two windows and a keyboard. On a phone
-it is three dead ends:
+Built for one workflow: **an agent harness in Termux, with a browser beside it to check what
+the agent wrote.** On a desktop that is two windows and a keyboard. On a phone, three things
+are missing:
 
-- **Nothing to point with.** A touchscreen has no hover and no precise drag, so a browser's
-  devtools, its tab strip or a small `✕` are finger-sized guesses — and the tabs you actually
-  want are up in Termux's tab strip, a trip away from the keys you are typing on.
-- **The keys an agent runs on are not on the keyboard.** `Esc` to interrupt, `Ctrl+C` to kill a
-  run, `Tab` to complete a path, `Ctrl+B` for tmux, arrows to move through an editor,
-  `PageUp`/`PageDown` to read scrollback: Android's soft keyboard has none of them. The panel's
-  rows are laid out like Termux's extra-keys rows, for the same reason, and the layout is a
-  string you can replace at runtime.
-- **No room for both.** Debugging means the browser and the terminal side by side, and a split
-  divider is a hairline to hit while a soft keyboard is up.
+- **A pointer.** A touchscreen has no hover and no precise drag, so a browser's devtools, its
+  tab strip or its `✕` are guesses. The tabs you want are up in Termux's tab strip, away from
+  the keys.
+- **The keys.** `Esc`, `Ctrl+C`, `Tab`, `Ctrl+B`, the arrows, `PageUp`/`PageDown` — the soft
+  keyboard has none of them. The panel's rows follow Termux's extra-keys rows, and the layout
+  is a string you can replace at runtime.
+- **Room for both.** The browser and the terminal have to share one screen, and the split
+  divider is thin enough that a finger misses it.
 
-The three answers: a drawn pointer injected as a real `SOURCE_MOUSE`, a keys panel you can
-redefine, and a display picker that aims the pointer at another screen — or at a virtual
-display the app creates for itself.
+Those three are what the app supplies: a drawn pointer injected as a real `SOURCE_MOUSE`, a
+keys panel you can redefine, and a display picker that aims the pointer at another screen,
+including a virtual one the app creates.
 
 It was built and driven on a **Galaxy Z Fold 4** (SM-F936B, Android 16, aarch64), in
 Termux, with no desktop in the loop — and that is the point: a phone with a package
@@ -47,7 +45,7 @@ Two floating dots, and four controls docked inside the pad:
 
 ## A foldable, unfolded
 
-The controls above exist because of the shape of the device, not in spite of it:
+The shape of the device is why the controls above exist:
 
 - **Click-through keeps the big screen usable.** The pad can cover the corner of an app and
   still click the thing underneath it, which is the difference between a trackpad and an
