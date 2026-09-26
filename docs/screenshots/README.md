@@ -41,7 +41,9 @@ earlier hero ended on one. Both bounds come from mapping the clip frame by frame
 Both recordings were re-encoded to 540×650 for the web. The **full** GIFs (16 MB and 7.4 MB) stay
 out of the repo, but the **compact GIFs** are committed and embedded in the README — `../media/demo.gif`
 as the hero, 0.14 MB, the 11.2–15 s window of the browser clip, and `../media/demo-termux.gif`,
-0.27 MB, cut the same way. All three are 480 px at 10 fps on a 16-colour palette. The content is
+0.27 MB, cut the same way. Each is embedded once: the hero sits under the intro as the first
+thing in the file, and the other two sit in **What it does**, which links to the hero instead of
+repeating it. All three are 480 px at 10 fps on a 16-colour palette. The content is
 mostly monochrome UI chrome, so the small palette costs little: the two quiet clips land at 0.14
 and 0.27 MB, while `demo-vdisplay.gif` — which redraws a whole launcher over a photo wallpaper —
 lands at 0.64 MB.

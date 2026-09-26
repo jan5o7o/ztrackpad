@@ -5,6 +5,10 @@ picker / virtual display** for Android — built entirely on the phone with a ha
 Termux toolchain: no SDK install and no Gradle. The build downloads only the platform
 jar it compiles against.
 
+![The drawn pointer driving github.com/jan5o7o/ztrackpad in Kiwi Browser, with the keys panel across the bottom and the pad down the right edge over a Termux session](docs/media/demo.gif)
+
+Designed for foldables: an unfolded Fold is a small desktop with no pointer.
+
 ## The problem it was built for
 
 Built for one workflow: **an agent harness in Termux, with a browser beside it to check what
@@ -267,9 +271,8 @@ with a picture of something else.
 
 ### A pointer you can actually see
 
-![The drawn pointer driving github.com/jan5o7o/ztrackpad in Kiwi Browser, with the keys panel across the bottom and the pad down the right edge over a Termux session](docs/media/demo.gif)
-
-A finger on the pad moves a drawn arrow over any app, injected as a real `SOURCE_MOUSE` — so
+The hero clip at the top of this file shows it. A finger on the pad moves a drawn arrow over
+any app, injected as a real `SOURCE_MOUSE` — so
 hover, click, scroll and window drag all behave like a desktop's. Tap to click, hold still to
 long-press, two fingers to scroll. The arrow in that clip is the app's, not the system's.
 
