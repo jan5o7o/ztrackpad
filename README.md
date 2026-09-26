@@ -8,21 +8,20 @@ jar it compiles against.
 ## The problem it was built for
 
 Built for one workflow: **an agent harness in Termux, with a browser beside it to check what
-the agent wrote.** On a desktop that is two windows and a keyboard. On a phone, three things
-are missing:
+the agent wrote.** It needs three things a phone does not give you.
 
 - **A pointer.** A touchscreen has no hover and no precise drag, so a browser's devtools, its
-  tab strip or its `✕` are guesses. The tabs you want are up in Termux's tab strip, away from
-  the keys.
-- **The keys.** `Esc`, `Ctrl+C`, `Tab`, `Ctrl+B`, the arrows, `PageUp`/`PageDown` — the soft
-  keyboard has none of them. The panel's rows follow Termux's extra-keys rows, and the layout
-  is a string you can replace at runtime.
-- **Room for both.** The browser and the terminal have to share one screen, and the split
-  divider is thin enough that a finger misses it.
+  tab strip or its `✕` are guesses. The pad draws an arrow and injects it as a real
+  `SOURCE_MOUSE`, which is why a window drag behaves like a laptop's. The tabs you want are up
+  in Termux's tab strip, away from the keys.
+- **The keys.** `Esc`, `Ctrl+C`, `Tab`, `Ctrl+B`, the arrows, `PageUp`/`PageDown`: the soft
+  keyboard has none of them. The panel's rows follow Termux's extra-keys rows, and the layout is
+  a string you can replace at runtime.
+- **Room for both.** The browser and the terminal share one screen, and the split divider is
+  thin enough that a finger misses it.
 
-Those three are what the app supplies: a drawn pointer injected as a real `SOURCE_MOUSE`, a
-keys panel you can redefine, and a display picker that aims the pointer at another screen,
-including a virtual one the app creates.
+The display picker covers the rest: the pointer can be aimed at the cover screen, an HDMI or
+XREAL output, or a virtual display the app creates.
 
 It was built and driven on a **Galaxy Z Fold 4** (SM-F936B, Android 16, aarch64), in
 Termux, with no desktop in the loop — and that is the point: a phone with a package
