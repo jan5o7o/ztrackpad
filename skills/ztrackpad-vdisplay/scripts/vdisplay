@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# vdisplay - create/show/hide/destroy ztrackpad's virtual display from a script.
+#
+#   vdisplay status
+#   vdisplay create [--headless]
+#   vdisplay show
+#   vdisplay hide
+#   vdisplay destroy
+#   vdisplay keys                 # print the current key layout spec
+#   vdisplay keys '<spec>'        # set a custom key layout
+#   vdisplay keys-reset           # back to the built-in layout
+#   vdisplay lock on|off|toggle   # freeze the pad against moving and resizing
+#
+# ztrackpad must be running with its accessibility service enabled and Shizuku
+# granted: it owns the overlay windows and the Shizuku binding, so this only pokes it
+# over a broadcast. Needs an adb connection to the device, because sending a broadcast
+# requires shell - a phone-side shell (Termux) has no `am` of its own.
+#
+# Prints ztrackpad's one-line status reply, and exits non-zero on an error.
+set -euo pipefail
+
+PKG=app.so7o.ztrackpad
+ACTION="$PKG.VDISPLAY"
+RECEIVER="$PKG/.VDisplayReceiver"
+ADB="${VDISPLAY_ADB:-adb}"
+
+# Single-quote a value for the REMOTE shell.
+#
+# `adb shell` does not exec argv directly: it joins the arguments and hands the string to
+# a shell on the device. So a spec containing '|' or ';' is parsed as shell syntax - a row
+# separator became a pipe and the rest of the layout vanished into
+# "/system/bin/sh: ...: inaccessible or not found". The embedded '\'' is the standard
+# POSIX way to put a single quote inside a single-quoted string.
+sq() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+usage() {
+    # print the leading comment block, up to the first line that is not a comment
+    awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
+    exit "${1:-0}"
+}
+
+case "${1:-}" in
+    -h|--help|help) usage 0 ;;
+esac
+
+op=${1:-status}
+shift || true
+
+# `keys` takes an optional positional spec. Pick it up BEFORE the option loop, or a spec
+# full of ':' and ';' reads as an unknown flag.
+spec=""
+arg=""
+if [ "$op" = "keys" ] && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
+    spec="$1"
+    shift
+fi
+if [ "$op" = "lock" ] && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
+    arg="$1"
+    shift
+fi
+
+headless=false
+for a in "$@"; do
+    case "$a" in
+        --headless|-H) headless=true ;;
+        -h|--help|help) usage 0 ;;
+        *) echo "vdisplay: unknown option '$a'" >&2; usage 1 ;;
+    esac
+done
+
+case "$op" in
+    status|create|show|hide|destroy|keys|keys-reset|lock) ;;
+    *) echo "vdisplay: unknown op '$op'" >&2; usage 1 ;;
+esac
+
+args=(-n "$RECEIVER" -a "$ACTION" --es op "$op")
+[ "$headless" = true ] && args+=(--ez headless true)
+[ -n "$spec" ] && args+=(--es spec "$(sq "$spec")")
+[ -n "$arg" ] && args+=(--es arg "$arg")
+
+if ! out=$("$ADB" shell am broadcast "${args[@]}" 2>&1); then
+    echo "vdisplay: adb failed - is the device connected?" >&2
+    echo "$out" >&2
+    exit 1
+fi
+
+# am prints:  Broadcast completed: result=0, data="shizuku=ready id=25 ..."
+line=$(printf '%s\n' "$out" | sed -n 's/.*data="\(.*\)"$/\1/p' | head -1)
+result=$(printf '%s\n' "$out" | sed -n 's/.*result=\(-\{0,1\}[0-9]\{1,\}\).*/\1/p' | head -1)
+
+if [ -z "$line" ]; then
+    echo "vdisplay: no reply - is ztrackpad's accessibility service enabled?" >&2
+    printf '%s\n' "$out" >&2
+    exit 1
+fi
+
+printf '%s\n' "$line"
+[ "$result" = "0" ] || exit 1

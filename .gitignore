@@ -1,0 +1,14 @@
+# build output
+build/
+out/
+
+# signing key — never commit
+keystore.jks
+
+# android platform jar (27MB, documented in README); the bare name matches a
+# symlinked sdk as well as a directory
+sdk
+
+# misc
+*.apk
+__pycache__/

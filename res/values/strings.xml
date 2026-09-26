@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Z Trackpad</string>
+    <string name="accessibility_service_description">Floating trackpad with an on-screen pointer. Draws the trackpad and pointer windows and performs taps, long-presses and scrolls at the pointer position. No screen content is read.</string>
+</resources>
