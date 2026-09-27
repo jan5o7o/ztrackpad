@@ -1,4 +1,4 @@
-# Z Trackpad
+# So7o Z Trackpad
 
 A floating **trackpad + pointer**, a **programmable keys panel**, and a **display
 picker / virtual display** for Android — built entirely on the phone with a hand-rolled

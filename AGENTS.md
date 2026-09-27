@@ -1,4 +1,4 @@
-# AGENTS.md — Z Trackpad
+# AGENTS.md — So7o Z Trackpad
 
 ## What this is
 
