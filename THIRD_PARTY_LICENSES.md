@@ -1,6 +1,6 @@
 # Third-party licences
 
-Z Trackpad is MIT ([`LICENSE`](LICENSE)). It also vendors five jars in `libs/` so the build
+So7o Z Trackpad is MIT ([`LICENSE`](LICENSE)). It also vendors five jars in `libs/` so the build
 needs no network, and `build.sh` feeds every one of them to `d8` — so their code ends up
 inside `classes.dex` and their terms ship with the APK. Both licences below require their
 text to be passed on, which is what this file and `licenses/` are for.
@@ -18,7 +18,7 @@ Unmodified, from [RikkaApps/Shizuku-API](https://github.com/RikkaApps/Shizuku-AP
 Copyright (c) 2021 RikkaW, MIT.
 
 This is the **client** library only. Nothing of the Shizuku manager (the app that runs as
-shell) is vendored or redistributed here, and Z Trackpad is not affiliated with or endorsed
+shell) is vendored or redistributed here, and So7o Z Trackpad is not affiliated with or endorsed
 by the Shizuku project. The app declares `moe.shizuku.manager.permission.API_V23`, which is
 how a Shizuku client asks to be allowed to use the API — it is a request for permission from
 the Shizuku app, not a permission the app claims on its own.

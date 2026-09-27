@@ -107,7 +107,7 @@ real input; without it the pads appear but keys and drags do nothing. Shizuku it
 (or root) to start after a reboot, which is the one real setup cost of using this app at all.
 
 **After installing**, enable the accessibility service: open the app and tap *Open Accessibility
-Settings*, then turn on **Z Trackpad** under *Installed services*. Two small dots appear, and
+Settings*, then turn on **So7o Z Trackpad** under *Installed services*. Two small dots appear, and
 that is it.
 
 ## Quick start (Termux, on the phone)

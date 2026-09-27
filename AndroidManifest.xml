@@ -8,14 +8,14 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
-        android:label="Z Trackpad"
+        android:label="So7o Z Trackpad"
         android:allowBackup="false"
         android:hardwareAccelerated="true">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="Z Trackpad">
+            android:label="So7o Z Trackpad">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

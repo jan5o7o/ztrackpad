@@ -110,7 +110,7 @@ echo "==> 6/6 sign"
 if [ ! -f "$KS" ]; then
   keytool -genkeypair -v -keystore "$KS" -storepass "$KSPASS" -keypass "$KSPASS" \
     -alias ztrackpad -keyalg RSA -keysize 2048 -validity 10000 \
-    -dname "CN=Z Trackpad, OU=dev, O=local, L=., S=., C=US" >/dev/null 2>&1
+    -dname "CN=So7o Z Trackpad, OU=dev, O=local, L=., S=., C=US" >/dev/null 2>&1
   echo "    generated $KS"
 fi
 apksigner sign \
