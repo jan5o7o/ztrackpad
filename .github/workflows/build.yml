@@ -1,0 +1,80 @@
+name: build
+
+# Proves the tree compiles, packages and signs, and that the development identity is nowhere in
+# it. Deliberately not "the scripts parse": an APK is published from this tree, so the check that
+# matters is that this tree can produce one. Device checks (`tests/smoke.sh`) need a phone and
+# stay manual - see RELEASING.md.
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Platform and build-tools
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0" > /dev/null
+
+      - name: Shell syntax
+        run: |
+          for f in build.sh tests/smoke.sh; do printf '%s: ' "$f"; bash -n "$f" && echo ok; done
+
+      - name: Throwaway signing key
+        # The release key is not in this repository and must never be - it is what lets an
+        # existing install update in place, and losing it means no install can ever update
+        # again. CI signs with a throwaway key purely so the build path runs end to end.
+        run: |
+          keytool -genkeypair -keystore keystore.jks -storepass ci-only -keypass ci-only \
+            -alias ci -dname "CN=CI, OU=build, O=ci, L=., S=., C=US" \
+            -keyalg RSA -keysize 2048 -validity 1 > /dev/null 2>&1
+
+      - name: Build
+        env:
+          KSPASS: ci-only
+        run: |
+          mkdir -p sdk/platforms
+          ln -sfn "$ANDROID_HOME/platforms/android-36" sdk/platforms/android-36
+          ./build.sh
+
+      - name: No development-tree string in the tree
+        # .github is excluded because this file has to name the patterns it searches for.
+        run: |
+          if grep -rIl --exclude-dir=.git --exclude-dir=.github \
+               -e 'com\.pi\.' -e 'pi-trackpad' -e 'Pi Trackpad' . ; then
+            echo "::error::a development-tree string is in the tracked tree"
+            exit 1
+          fi
+          echo "tree is clean"
+
+      - name: ...nor inside the artefact
+        run: |
+          aapt2 dump badging out/ztrackpad.apk | grep -E '^package|application-label:'
+          hits=$(unzip -p out/ztrackpad.apk classes.dex | strings | grep -c 'com\.pi\.' || true)
+          echo "development id hits in classes.dex: $hits"
+          test "$hits" = "0"
+          sha256sum out/ztrackpad.apk
+
+      - name: Keep the APK for inspection
+        # Signed with the throwaway key, so it is NOT the release artefact and cannot update an
+        # install of it. Useful when a run fails on the device side of a change.
+        uses: actions/upload-artifact@v4
+        with:
+          name: ztrackpad-ci-build
+          path: out/ztrackpad.apk
+          retention-days: 7
