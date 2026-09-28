@@ -376,13 +376,21 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
 - Real `SOURCE_MOUSE` injection via Shizuku for hover/click/drag — this is what
   lets a window actually be moved, which `dispatchGesture` cannot do reliably
 - Shizuku is used when ready, with accessibility `dispatchGesture` fallback
+- **Floating-window list** (`▤`): every window on the display in one place — the full-screen app
+  first, then each floating window, front-most first. Tap a row to raise it, so a window that is
+  hidden behind another (or minimized) comes back; tapping the full-screen row minimizes whatever
+  is in the way
 - Keys panel mirrors the owner's Termux extra-keys rows:
   - Row 1: `ESC TAB CTRL 🅱️ SHIFT 🆎️ ALT HOME END 🅿️ *️⃣🅱️ ⏎ ⌫`
   - Symbol row: `~ \` ; : ? ' " - _ / ,`
   - Number + QWERTY rows, `SHIFT z x c v b n m ⏎`, nav row, `space` + `⌫ back`
   - tmux macros fire (e.g. `*️⃣🅱️` = `CTRL+B` twice)
 - **The whole key layout is customizable at runtime** — one spec string, no rebuild:
-  `vdisplay keys '<spec>'`. Format and examples in `skills/ztrackpad-vdisplay/SKILL.md`.
+  `vdisplay keys '<spec>'`. Format and examples in `skills/ztrackpad-vdisplay/SKILL.md`, and the
+  gear dot switches the panel between the built-in keyboard and your own spec.
+- **A CONTROLS panel in the pad** (the gear dot, outermost on the right): the keys choice above,
+  on/off switches for the `⌨` and `▤` dots, and links to the keys guide and the issue tracker.
+  The pad's own dot has no switch — it is the only way to show the pad, and it carries the gear.
 - Sticky `CTRL/ALT/SHIFT` modifiers, **hold-to-auto-repeat** on all keys
 - **Haptics** on key taps (system CLICK effect, honours `haptic_feedback_enabled`)
 - Press feedback (keys highlight blue while held)
