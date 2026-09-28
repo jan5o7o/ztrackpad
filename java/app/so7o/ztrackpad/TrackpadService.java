@@ -4,7 +4,9 @@ import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
@@ -15,9 +17,11 @@ import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.hardware.display.DeviceProductInfo;
+import android.net.Uri;
 import android.hardware.display.DisplayManager;
 import android.os.Handler;
 import android.os.Looper;
@@ -25,6 +29,7 @@ import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
@@ -41,12 +46,14 @@ import android.view.animation.DecelerateInterpolator;
 import android.view.accessibility.AccessibilityEvent;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -87,12 +94,17 @@ public class TrackpadService extends AccessibilityService {
      * The edge strips scroll at this fraction of the two-finger gain, in flushes of this many
      * px of finger travel.
      *
-     * Half the gain, and half the travel per flush, so a swipe down the side arrives in
-     * smaller steps than a two-finger drag does. The flush is also *capped* at the same
+     * A quarter of the gain, and half the travel per flush, so a swipe down the side arrives
+     * in smaller steps than a two-finger drag does. The flush is also *capped* at the same
      * amount: without that, a fast flick accumulates a lot of travel between two throttled
      * flushes and delivers it as one jump, which defeats the point of the smaller step.
+     *
+     * The factor scales only the injected distance, not the travel accounting - a flush
+     * consumes EDGE_FLUSH_PX of finger travel whatever the gain - so this is the one knob
+     * for "how far does the page move", and 0.25 puts it at ~0.35px of content per px of
+     * finger, where 0.5 was ~0.7 and still felt fast.
      */
-    private static final float EDGE_SCROLL_FACTOR = 0.5f;
+    private static final float EDGE_SCROLL_FACTOR = 0.25f;
     private static final float EDGE_FLUSH_PX = 12f;
     /** px of injected scroll per px of finger travel, for the two-finger drag. */
     private static final float SCROLL_GAIN = 1.4f;
@@ -156,6 +168,8 @@ public class TrackpadService extends AccessibilityService {
     private static final String PICKER_KEY = "d_";
     private static final String SCREEN_KEY = "v_";
     private static final String THEME_KEY = "t_";
+    private static final String TASKS_KEY = "f_";
+    private static final String CONTROLS_KEY = "c_";
 
     /** Pref holding the *uniqueId* of the target display (ids are not stable). */
     private static final String PREF_TARGET_DISPLAY = "targetDisplay";
@@ -177,6 +191,19 @@ public class TrackpadService extends AccessibilityService {
      */
     private static final String PREF_LOCK = "padLocked";
 
+    /** Pref: "full" builds the built-in keyboard, "favorites" a spec of your own. */
+    private static final String PREF_KEYS_MODE = "keysMode";
+
+    /**
+     * Prefs for whether each optional dot exists at all.
+     *
+     * There is deliberately no pref for the pad's own dot: it is the only way to show the
+     * pad (which has no close button) and it carries the docked dots that open this panel
+     * and the theme menu, so hiding it would strand the way back to everything.
+     */
+    private static final String PREF_SHOW_KEYS_BUBBLE = "showKeysBubble";
+    private static final String PREF_SHOW_TASKS_BUBBLE = "showTasksBubble";
+
     /** Opacity slider range, in percent. */
     private static final int OPACITY_MIN = 20;
     private static final int OPACITY_MAX = 100;
@@ -191,6 +218,19 @@ public class TrackpadService extends AccessibilityService {
      */
     private static final String SECONDARY_LAUNCHER =
             "com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher";
+
+    /**
+     * The floating-window list, filtered shell-side.
+     *
+     * The `grep` is not cosmetic: the whole dump is 336 KB and this reply is 5 KB, for the
+     * same ~110 ms, so the cut is free. `Display #` lines come along because a task header
+     * does not name its display - the section header is the only place that information
+     * exists. `mBounds=Rect` is anchored to the start of a line on purpose: the config
+     * blocks print `winConfig={ mBounds=Rect(...) }` inline, and a looser pattern drags all
+     * of those in too (which is most of the dump).
+     */
+    private static final String TASKS_CMD =
+            "dumpsys activity activities | grep -E '^ *Display #|^ *\\* Task[{]|^ *mBounds=Rect'";
 
     private WindowManager wm;
     private SharedPreferences prefs;
@@ -261,6 +301,48 @@ public class TrackpadService extends AccessibilityService {
     private float pendingOpacity = -1f;
     private boolean themeVisible = false;
 
+    // floating-window list (the "pop-up view" task switcher)
+    private View tasksBubble, tasksPanel;
+    private WindowManager.LayoutParams tasksBubbleLp, tasksPanelLp;
+    private LinearLayout tasksRows;
+    private boolean tasksVisible = false;
+    /** True while a list fetch is in flight, so taps cannot pile up shell round trips. */
+    private boolean tasksBusy = false;
+
+    // controls panel - the gear dot docked on the pad
+    private View controlsPanel;
+    private WindowManager.LayoutParams controlsPanelLp;
+    private LinearLayout controlsRows;
+    private boolean controlsVisible = false;
+    /** "full" or "favorites"; see PREF_KEYS_MODE. */
+    private String keysMode = "full";
+    private boolean showKeysBubble = true, showTasksBubble = true;
+    /** The list as last rendered, so a tap can act on rows it did not have to re-read. */
+    private List<TaskRow> lastRows;
+    /**
+     * Bounds a parked window had before it was shrunk, keyed by task id.
+     *
+     * In memory only: task ids are reused, and a stale entry from a previous run could
+     * point at somebody else's window. Entries are dropped as soon as a fetch stops
+     * listing the task.
+     */
+    private final HashMap<Integer, int[]> parkedBounds = new HashMap<Integer, int[]>();
+
+    /** Height of the strip floating windows are parked into, in dp. */
+    private static final int PARK_H = 140;
+
+    /**
+     * Where a pop-up's own minimize button sits inside its window, in dp from its top-right
+     * corner. Measured on this device (2026-09-27): with a window at `300,300 - 1500,1500`
+     * the `-` is at `1220,350`, and tapping it takes the task to `visible=false` with the
+     * task still alive and still freeform. Samsung lays its pop-up header out in dp, but
+     * that is an assumption, which is why no minimize is trusted without checking.
+     */
+    private static final int MINIMIZE_FROM_RIGHT = 124;
+    private static final int MINIMIZE_FROM_TOP = 22;
+    /** How long the window manager gets to hide a minimized window before it is checked. */
+    private static final long MINIMIZE_SETTLE_MS = 1200L;
+
     /**
      * A second arrow, opened as an overlay ON the target display when the pointer is on a
      * display that isn't ours. A window we own cannot be composited into another display's
@@ -318,6 +400,9 @@ public class TrackpadService extends AccessibilityService {
         theme = Theme.byId(prefs.getString(PREF_THEME, Theme.DEFAULT_ID));
         opacity = prefs.getFloat(PREF_OPACITY, 1f);
         keysSpec = prefs.getString(PREF_KEYS, null);
+        keysMode = prefs.getString(PREF_KEYS_MODE, "full");
+        showKeysBubble = prefs.getBoolean(PREF_SHOW_KEYS_BUBBLE, true);
+        showTasksBubble = prefs.getBoolean(PREF_SHOW_TASKS_BUBBLE, true);
         padLocked = prefs.getBoolean(PREF_LOCK, false);
 
         cursorX = outW / 2f;
@@ -419,6 +504,7 @@ public class TrackpadService extends AccessibilityService {
             // parked past the new edge when the screen turns
             resnapBubble(bubble, bubbleLp, bubbleSide);
             resnapBubble(keysBubble, keysBubbleLp, keysBubbleSide);
+            resnapBubble(tasksBubble, tasksBubbleLp, tasksBubbleSide);
         }
     }
 
@@ -455,10 +541,13 @@ public class TrackpadService extends AccessibilityService {
         buildScreenPanel();
         buildBubble();
         buildKeysBubble();
+        buildTasksBubble();
         buildCursor();
         buildPad();
         buildKeysPanel();
         buildPickerPanel();
+        buildControlsPanel();
+        buildTasksPanel();
         buildThemePanel();
     }
 
@@ -479,12 +568,16 @@ public class TrackpadService extends AccessibilityService {
         boolean pickerWas = pickerVisible;
         boolean themeWas = themeVisible;
         boolean screenWas = (screenPanel != null && screenPanel.getVisibility() == View.VISIBLE);
+        boolean tasksWas = tasksVisible;
+        boolean controlsWas = controlsVisible;
 
         // persist geometry first, or the rebuild would fall back to the defaults
         saveGeometry(padLp, PAD_KEY);
         saveGeometry(keysPanelLp, KEYS_KEY);
         saveGeometry(pickerPanelLp, PICKER_KEY);
         saveGeometry(screenPanelLp, SCREEN_KEY);
+        saveGeometry(tasksPanelLp, TASKS_KEY);
+        saveGeometry(controlsPanelLp, CONTROLS_KEY);
 
         removeViews();
         buildAll();
@@ -496,6 +589,8 @@ public class TrackpadService extends AccessibilityService {
         setPickerVisible(pickerWas);
         // keep the theme panel open, so presets can be tried one after another
         setThemeVisible(themeWas);
+        setTasksVisible(tasksWas);
+        setControlsVisible(controlsWas);
 
         raise(pad, padLp, "pad");
         if (CURSOR_ABOVE_PANELS) raise(cursor, cursorLp, "cursor");
@@ -516,6 +611,7 @@ public class TrackpadService extends AccessibilityService {
     private void restyleBubbles() {
         restyleBubble(bubble, theme.bubbleTrack);
         restyleBubble(keysBubble, theme.bubbleKeys);
+        restyleBubble(tasksBubble, theme.bubbleTasks);
     }
 
     private void restyleBubble(View v, int textColor) {
@@ -704,17 +800,23 @@ public class TrackpadService extends AccessibilityService {
     private void removeViews() {
         try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) {}
         try { if (keysBubble != null) wm.removeView(keysBubble); } catch (Exception ignored) {}
+        try { if (tasksBubble != null) wm.removeView(tasksBubble); } catch (Exception ignored) {}
+        try { if (controlsPanel != null) wm.removeView(controlsPanel); } catch (Exception ignored) {}
         try { if (pad != null) wm.removeView(pad); } catch (Exception ignored) {}
         try { if (keysPanel != null) wm.removeView(keysPanel); } catch (Exception ignored) {}
         try { if (pickerPanel != null) wm.removeView(pickerPanel); } catch (Exception ignored) {}
         try { if (themePanel != null) wm.removeView(themePanel); } catch (Exception ignored) {}
+        try { if (tasksPanel != null) wm.removeView(tasksPanel); } catch (Exception ignored) {}
         try { if (screenPanel != null) wm.removeView(screenPanel); } catch (Exception ignored) {}
         try { if (cursor != null) wm.removeView(cursor); } catch (Exception ignored) {}
-        bubble = keysBubble = pad = keysPanel = null;
-        pickerPanel = themePanel = screenPanel = null;
+        bubble = keysBubble = tasksBubble = pad = keysPanel = null;
+        pickerPanel = themePanel = screenPanel = tasksPanel = null;
+        controlsPanel = null;
         cursor = null;
         themeRows = null;
         opacityRows = null;
+        tasksRows = null;
+        controlsRows = null;
     }
 
     private void removeAll() {
@@ -1429,8 +1531,9 @@ public class TrackpadService extends AccessibilityService {
         // otherwise the built-in one, which is just the same format as data.
         if ("keys".equals(op)) {
             if (spec == null) {
-                return "spec=" + ((keysSpec == null || keysSpec.length() == 0)
-                        ? DEFAULT_KEYS_SPEC : keysSpec);
+                // what is on screen, so it can be edited: the favorites spec when favorites
+                // is selected, the built-in layout otherwise
+                return "spec=" + activeKeysSpec();
             }
             keysSpec = spec;
             prefs.edit().putString(PREF_KEYS, spec).apply();
@@ -1485,7 +1588,105 @@ public class TrackpadService extends AccessibilityService {
             return "ok create-floating " + vdisplayStatus();
         }
 
-        return "error: unknown op '" + op + "' (status|create|destroy|show|hide|lock)";
+        // The split-divider nudge that used to be the pad's two round buttons. Kept
+        // scriptable so the measured drag is still reachable without them. Asynchronous,
+        // like a button press was: it is a `dumpsys` round trip plus an injected drag.
+        if ("split".equals(op)) {
+            String what = (arg == null) ? "" : arg.trim();
+            if (!"up".equals(what) && !"down".equals(what)) return "error: split wants up|down";
+            splitNudge("up".equals(what) ? 1 : -1);
+            return "ok split " + what;
+        }
+
+        // The controls panel, like the tasks panel: scriptable so it can be shown without a
+        // finger, which is also how it gets verified.
+        if ("controls".equals(op)) {
+            String what = (arg == null || arg.length() == 0) ? "toggle" : arg.trim();
+            if ("show".equals(what)) setControlsVisible(true);
+            else if ("hide".equals(what)) setControlsVisible(false);
+            else if ("toggle".equals(what)) setControlsVisible(!controlsVisible);
+            else return "error: controls wants show|hide|toggle";
+            return "ok controls " + (controlsVisible ? "shown" : "hidden") + " keys-mode=" + keysMode
+                    + " bubbles=keys:" + onOff(showKeysBubble) + ",tasks:" + onOff(showTasksBubble);
+        }
+
+        // Which layout the keys panel shows, and which of the optional dots exist. Both
+        // mirror the CONTROLS panel's rows exactly - same setters, so a script and a finger
+        // cannot disagree - and both report the current state when given no arg.
+        if ("keys-mode".equals(op)) {            String what = (arg == null) ? "" : arg.trim();
+            if (what.length() == 0) return "ok keys-mode " + keysMode;
+            if (!"full".equals(what) && !"favorites".equals(what)) {
+                return "error: keys-mode wants full|favorites";
+            }
+            setKeysMode(what);
+            return "ok keys-mode " + keysMode + " " + keySpecSummary();
+        }
+
+        if ("bubbles".equals(op)) {            String what = (arg == null) ? "" : arg.trim();
+            if (what.length() > 0) {
+                String[] parts = what.split(",");
+                for (int i = 0; i < parts.length; i++) {
+                    String one = parts[i].trim();
+                    int eq = one.indexOf('=');
+                    if (eq < 0) return "error: bubbles wants keys=on|off,tasks=on|off";
+                    String name = one.substring(0, eq).trim();
+                    String val = one.substring(eq + 1).trim();
+                    if (!"on".equals(val) && !"off".equals(val)) {
+                        return "error: bubbles wants on|off, not '" + val + "'";
+                    }
+                    if ("keys".equals(name)) setBubbleShown(true, "on".equals(val));
+                    else if ("tasks".equals(name)) setBubbleShown(false, "on".equals(val));
+                    else return "error: unknown dot '" + name + "' (keys|tasks)";
+                }
+            }
+            return "ok bubbles keys=" + onOff(showKeysBubble) + " tasks=" + onOff(showTasksBubble);
+        }
+
+        // Floating ("pop-up view") windows. With no arg, list them; with an arg, drive the
+        // panel - so the UI can be exercised without tapping, like every other op here.
+        if ("tasks".equals(op)) {
+            if (arg != null && arg.length() > 0) {
+                String what = arg.trim();
+                if ("show".equals(what)) setTasksVisible(true);
+                else if ("hide".equals(what)) setTasksVisible(false);
+                else if ("toggle".equals(what)) setTasksVisible(!tasksVisible);
+                else return "error: tasks wants show|hide|toggle, or no arg to list";
+                return "ok tasks " + (tasksVisible ? "shown" : "hidden");
+            }
+            if (!useShizuku()) return "error: tasks needs Shizuku";
+            List<TaskRow> rows = parseWindows(shizuku.run(TASKS_CMD), surfaceDisplayId);
+            StringBuilder sb = new StringBuilder("ok tasks n=").append(rows.size())
+                    .append(" display=").append(surfaceDisplayId);
+            for (int i = 0; i < rows.size(); i++) {
+                TaskRow r = rows.get(i);
+                sb.append(' ').append(r.id).append(':').append(r.pkg)
+                        .append(':').append(r.visible ? "visible" : "hidden")
+                        .append(':').append(r.fullscreen ? "fullscreen" : "floating");
+            }
+            return sb.toString();
+        }
+
+        // arg is a task id from `tasks`. This is the same code path a row tap takes, so a
+        // script cannot get a different result from a finger.
+        if ("taskfocus".equals(op)) {
+            String idArg = (arg == null) ? "" : arg.trim();
+            int id = parseIntOr(idArg, -1);
+            if (id < 0) return "error: taskfocus wants a task id in arg";
+            if (!useShizuku()) return "error: taskfocus needs Shizuku";
+            List<TaskRow> rows = parseWindows(shizuku.run(TASKS_CMD), surfaceDisplayId);
+            TaskRow row = findRow(rows, id);
+            if (row == null) return "error: task " + id + " is not in the list";
+            // Exactly what a row tap does, and deliberately asynchronous for the same reason a
+            // tap is: the minimize path is a tap, a settle and a verifying fetch, which is far
+            // too long to hold the main thread - this runs on the main thread, and every
+            // accessibility callback in this service does too. A caller that wants the result
+            // re-reads `tasks` (which is what tests/smoke.sh does).
+            activateRow(row, rows);
+            return "ok taskfocus " + id + " role=" + (row.fullscreen ? "fullscreen" : "floating");
+        }
+
+        return "error: unknown op '" + op + "' (status|create|destroy|show|hide|lock|keys"
+                + "|keys-reset|keys-mode|bubbles|controls|split|tasks|taskfocus)";
     }
 
     /** One line of key=value pairs, for scripts to parse. */
@@ -1506,7 +1707,7 @@ public class TrackpadService extends AccessibilityService {
 
     /** A short summary of the active keys layout, for a script to log. */
     private String keySpecSummary() {
-        String spec = (keysSpec == null || keysSpec.length() == 0) ? DEFAULT_KEYS_SPEC : keysSpec;
+        String spec = activeKeysSpec();
         List<String> rows = splitEscaped(spec, '|');
         int keys = 0;
         for (int i = 0; i < rows.size(); i++) {
@@ -1700,6 +1901,7 @@ public class TrackpadService extends AccessibilityService {
 
     private final BubbleSide bubbleSide = new BubbleSide(true);       // ● starts RIGHT
     private final BubbleSide keysBubbleSide = new BubbleSide(false);  // ⌨ starts LEFT
+    private final BubbleSide tasksBubbleSide = new BubbleSide(false); // ▤ starts LEFT
 
     /** The in-flight snap, so a new touch can cancel it instead of fighting it. */
     private ValueAnimator bubbleAnim;
@@ -2112,22 +2314,27 @@ public class TrackpadService extends AccessibilityService {
             }
         });
         dockDot(container, lockDot, false, 1);
-        addDockedDot(container, "\u25A3", theme.bubbleDisplay, true, 0,
+        addDockedDot(container, "\u25A3", theme.bubbleDisplay, true, 1,
                 new View.OnClickListener() {
                     @Override public void onClick(View v) {
                         tick(); setPickerVisible(!pickerVisible);
                     }
                 });
+        // The gear is docked right-most, which is why the display dot moved inward a slot.
+        addDockedDot(container, "\u2699", theme.bubbleControls, true, 0,
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        tick(); setControlsVisible(!controlsVisible);
+                    }
+                });
+
         // the handle's label is the only thing that reads the lock state, and updateModeUi
         // owns that label
         updateModeUi();
 
-        // Two round buttons on the pad's left edge nudge the split divider. Added before
-        // the resize grips on purpose: a FrameLayout dispatches touches to the newest child
-        // first, so in the corner where they can overlap (a pad pinched down to its minimum
-        // height) the grip still wins. They also sit on the left edge-scroll strip, whose
-        // band they take over for their own dp(58) of height.
-        addSplitButtons(container);
+        // The two round buttons that nudged a split divider used to be added here, on the
+        // pad's left edge. They are gone from the UI - that edge is the scroll strip, and
+        // that is where a thumb goes - and the nudge is now `op=split --es arg up|down`.
 
         GradientDrawable rbg = new GradientDrawable();
         rbg.setCornerRadius(dp(theme.radius));
@@ -2151,49 +2358,17 @@ public class TrackpadService extends AccessibilityService {
     }
 
     // =========================================================================
-    // Split-screen nudge buttons
+    // Split-screen nudge - script only
+    //
+    // This was two round buttons on the pad's left edge. They are gone from the UI, so the
+    // nudge is reached with `op=split --es arg up|down`. The work below is unchanged and
+    // still measured: see the notes on parseSplit and injectSplitDrag.
     // =========================================================================
 
     /**
      * Two round buttons pinned to the pad's left edge, vertically centred: up moves the
      * divider up, which grows the BOTTOM pane, and down does the reverse.
      */
-    private void addSplitButtons(FrameLayout container) {
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.CENTER);
-        col.addView(splitButton("\u2191", 1));
-        col.addView(splitButton("\u2193", -1));
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.LEFT | Gravity.CENTER_VERTICAL);
-        lp.leftMargin = dp(10);
-        container.addView(col, lp);
-    }
-
-    private TextView splitButton(String glyph, final int dir) {
-        TextView t = new TextView(this);
-        t.setText(glyph);
-        t.setTextColor(theme.textSecondary);
-        t.setTextSize(15f);
-        t.setGravity(Gravity.CENTER);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(fill(theme.bubbleFill));
-        bg.setStroke(dp(1.5f), theme.bubbleStroke);
-        t.setBackground(bg);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(26), dp(26));
-        lp.bottomMargin = dp(16);
-        t.setLayoutParams(lp);
-        // One nudge per press, deliberately not repeatable: a nudge reads the geometry over
-        // the shell bridge, drags, then reads it back to check, so holding the button would
-        // queue up work that finishes long after the finger is gone.
-        attachRepeat(t, new Runnable() {
-            @Override public void run() { splitNudge(dir); }
-        }, false);
-        return t;
-    }
-
     /**
      * Move the split divider one step, from a button press.
      *
@@ -2537,6 +2712,20 @@ public class TrackpadService extends AccessibilityService {
         clampGeometryToScreen(lp);
     }
 
+    /**
+     * As restoreGeometry, but with an explicit default position instead of the generic
+     * "centred, near the bottom". Only applies when nothing is saved yet, so it decides
+     * where the panel first appears rather than where it stays.
+     */
+    private void restoreGeometryAt(WindowManager.LayoutParams lp, String prefix,
+                                   int defW, int defH, int defX, int defY) {
+        restoreGeometry(lp, prefix, defW, defH);
+        if (prefs.contains(prefix + "x")) return;   // the user has put it somewhere
+        lp.x = defX;
+        lp.y = defY;
+        clampGeometryToScreen(lp);
+    }
+
     /** Re-centre a panel at its default size. */
     private void resetPanelGeometry(View target, WindowManager.LayoutParams lp,
                                     String prefix, int defW, int defH) {
@@ -2640,6 +2829,10 @@ public class TrackpadService extends AccessibilityService {
 
     /** Second floating dot, defaulting to the LEFT edge, toggling the keys panel. */
     private void buildKeysBubble() {
+        // Optional. This dot is the only way to open the keys panel, so hiding it is for
+        // people who do not use that panel at all - and the way back is the CONTROLS panel
+        // (whose own dot cannot be hidden) or `op=bubbles keys=on`.
+        if (!showKeysBubble) { keysBubble = null; return; }
         final int size = dp(44);
         TextView v = new TextView(this);
         v.setText("\u2328");
@@ -2906,8 +3099,7 @@ public class TrackpadService extends AccessibilityService {
      * A custom spec that yields nothing falls back rather than leaving a blank panel.
      */
     private void buildKeyRows(LinearLayout content) {
-        String spec = (keysSpec == null || keysSpec.trim().length() == 0)
-                ? DEFAULT_KEYS_SPEC : keysSpec;
+        String spec = activeKeysSpec();
         if (!buildKeyRowsFromSpec(spec, content)) {
             Log.w(TAG, "keys: spec produced no rows, using the built-in layout");
             content.removeAllViews();
@@ -3697,4 +3889,808 @@ public class TrackpadService extends AccessibilityService {
             return false;
         }
     }
+
+    // =========================================================================
+    // Floating windows ("pop-up view") - the task switcher
+    //
+    // Overlapping floating windows have no way to reach each other: the one at the back
+    // is simply hidden, and there is no affordance that names it. This is the entry point
+    // for one - a bubble that lists them and puts the chosen one in front.
+    //
+    // Scoped to the display the panels live on, which is the unfolded screen while the
+    // phone is open. On the cover screen the list is simply empty: display 1 reports
+    // canHostTasks=false, so nothing floats there to list. DeX and cross-display listing
+    // are deliberately not attempted yet.
+    // =========================================================================
+
+    /**
+     * One floating window, as read out of `dumpsys activity activities`.
+     *
+     * A plain holder rather than a TaskInfo because the list arrives as text. TaskInfo
+     * would come from IActivityTaskManager, which this app can only reach by reflecting on
+     * a hidden class - the shell bridge can run `dumpsys` today, so that is what v1 uses.
+     */
+    private static final class TaskRow {
+        int id;
+        String pkg;
+        boolean visible;
+        /** True for the fullscreen app the floating windows are sitting on top of. */
+        boolean fullscreen;
+        /** The task's own bounds as {left, top, right, bottom}, or null if it did not say. */
+        int[] bounds;
+    }
+
+    /**
+     * The floating entry point. A bubble rather than a docked dot on purpose: it has to be
+     * reachable while a floating window covers the pad, which is exactly the situation
+     * that makes the list worth having. It starts on the LEFT edge, level with the pad dot
+     * (0.45 of the screen height, so 55% up from the bottom) and directly ABOVE the keys
+     * dot at 0.55 - so the left edge reads top to bottom as windows, then keys.
+     */
+    private void buildTasksBubble() {
+        if (!showTasksBubble) { tasksBubble = null; return; }
+        final int size = dp(44);
+        TextView v = new TextView(this);
+        // U+25A4, from the same Geometric Shapes block as the other dots - an emoji here
+        // would ignore setTextColor and render in the font's own colours
+        v.setText("\u25A4");
+        v.setTextColor(theme.bubbleTasks);
+        v.setTextSize(19f);
+        v.setGravity(Gravity.CENTER);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(fill(theme.bubbleFill));
+        bg.setStroke(dp(1.5f), theme.bubbleStroke);
+        v.setBackground(bg);
+
+        tasksBubbleLp = overlayLp(size, size,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+        tasksBubbleLp.x = dp(8);                      // LEFT by default, above the ⌨ dot
+        // 55% up from the bottom, i.e. level with the pad dot on the other edge, with the
+        // keys dot below it - the three default heights are 0.45 (● and ▤) and 0.55 (⌨).
+        tasksBubbleLp.y = (int) (screenH * 0.45f);
+
+        attachBubbleDrag(v, tasksBubbleLp, tasksBubbleSide, new Runnable() {
+            @Override public void run() { setTasksVisible(!tasksVisible); }
+        });
+
+        tasksBubble = v;
+        try { wm.addView(tasksBubble, tasksBubbleLp); }
+        catch (Exception ex) { Log.e(TAG, "tasksBubble", ex); }
+    }
+
+    private void buildTasksPanel() {
+        FrameLayout container = new FrameLayout(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout handle = new LinearLayout(this);
+        handle.setGravity(Gravity.CENTER);
+        GradientDrawable hbg = new GradientDrawable();
+        hbg.setCornerRadii(new float[]{dp(theme.radius), dp(theme.radius),
+                dp(theme.radius), dp(theme.radius), 0, 0, 0, 0});
+        hbg.setColor(fill(theme.panelHead));
+        handle.setBackground(hbg);
+        handle.addView(makeChip("\u25A4  WINDOWS \u2014 tap to bring forward"));
+        handle.setOnTouchListener(new View.OnTouchListener() {
+            private float dx, dy;
+            @Override public boolean onTouch(View view, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        dx = e.getRawX() - tasksPanelLp.x;
+                        dy = e.getRawY() - tasksPanelLp.y;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        tasksPanelLp.x = (int) (e.getRawX() - dx);
+                        tasksPanelLp.y = (int) (e.getRawY() - dy);
+                        try { wm.updateViewLayout(tasksPanel, tasksPanelLp); } catch (Exception ignored) {}
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        saveGeometry(tasksPanelLp, TASKS_KEY);
+                        return true;
+                }
+                return false;
+            }
+        });
+        content.addView(handle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(34)));
+
+        // One row per floating window, and a window can be worth a long label - scroll
+        // rather than let the list grow past the bottom of the panel.
+        ScrollView scroll = new ScrollView(this);
+        tasksRows = new LinearLayout(this);
+        tasksRows.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(tasksRows, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+        content.addView(scroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        container.addView(content, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        GradientDrawable rbg = new GradientDrawable();
+        rbg.setCornerRadius(dp(theme.radius));
+        rbg.setColor(fill(theme.panelSolid));
+        rbg.setStroke(dp(1.5f), theme.panelStroke);
+        container.setBackground(rbg);
+
+        tasksPanelLp = overlayLp(dp(320), dp(280),
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+        tasksPanel = container;
+
+        addResizeGrips(container, tasksPanelLp, TASKS_KEY, true);
+
+        restoreGeometryAt(tasksPanelLp, TASKS_KEY, dp(320), dp(280), dp(173), dp(509));
+        try { wm.addView(tasksPanel, tasksPanelLp); }
+        catch (Exception ex) { Log.e(TAG, "tasksPanel", ex); }
+        setTasksVisible(false);
+    }
+
+    private void setTasksVisible(boolean visible) {
+        tasksVisible = visible;
+        if (tasksPanel == null) return;
+        if (visible) {
+            clampGeometryToScreen(tasksPanelLp);
+            raise(tasksPanel, tasksPanelLp, "tasksPanel");
+            // Refreshed on every open, because the list is a snapshot and focusing a
+            // window - or closing it from its own header - changes the order.
+            refreshTaskRowsAsync();
+        }
+        tasksPanel.setVisibility(visible ? View.VISIBLE : View.GONE);
+    }
+
+    /**
+     * Fetch the list off the main thread.
+     *
+     * A `dumpsys` round trip is ~100 ms measured through the same shell bridge. That is a
+     * visible stall on the main thread, and every accessibility callback in this service
+     * also runs there, so it would hold up input injection too.
+     */
+    private void refreshTaskRowsAsync() {
+        if (tasksBusy) return;
+        if (!useShizuku()) { renderTaskRows(null); return; }
+        tasksBusy = true;
+        final int displayId = surfaceDisplayId;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                List<TaskRow> rows = null;
+                try {
+                    rows = parseWindows(shizuku.run(TASKS_CMD), displayId);
+                } catch (Throwable t) {
+                    Log.w(TAG, "tasks: " + t);
+                }
+                final List<TaskRow> got = rows;
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        tasksBusy = false;
+                        renderTaskRows(got);
+                    }
+                });
+            }
+        }, "pi-tasks").start();
+    }
+
+    private void renderTaskRows(List<TaskRow> rows) {
+        if (tasksRows == null) return;
+        tasksRows.removeAllViews();
+        lastRows = rows;
+        if (rows == null) {
+            tasksRows.addView(taskNote("\u26A0  needs Shizuku", theme.footerText));
+            return;
+        }
+        forgetMissingParks(rows);
+        if (rows.isEmpty()) {
+            tasksRows.addView(taskNote("no floating windows on this screen", theme.textDim));
+            return;
+        }
+        for (int i = 0; i < rows.size(); i++) tasksRows.addView(taskRow(rows.get(i)));
+    }
+
+    /**
+     * Drop park records for tasks that are no longer listed.
+     *
+     * Task ids are reused, so a record kept past its task's death could later restore a
+     * stranger's window to the bounds of a window that no longer exists.
+     */
+    private void forgetMissingParks(List<TaskRow> rows) {
+        List<Integer> gone = null;
+        for (Integer key : parkedBounds.keySet()) {
+            if (!containsTask(rows, key.intValue())) {
+                if (gone == null) gone = new ArrayList<Integer>();
+                gone.add(key);
+            }
+        }
+        if (gone == null) return;
+        for (int i = 0; i < gone.size(); i++) parkedBounds.remove(gone.get(i));
+    }
+
+    private TextView taskNote(String text, int color) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(11f);
+        t.setTextColor(color);
+        t.setPadding(dp(12), dp(14), dp(12), dp(14));
+        return t;
+    }
+
+    private TextView taskRow(final TaskRow r) {
+        TextView t = new TextView(this);
+        String label = taskLabel(r.pkg);
+        // A hidden window is the reason this list exists - it is behind another window,
+        // or minimized, and there is no other way to name it. So mark it, do not filter it.
+        // The fullscreen app gets a marker too, because tapping it is the one row that can
+        // quietly do nothing: a fullscreen root task sits BELOW the floating windows, so
+        // focusing it cannot lift it past them. It works whenever nothing is floating on
+        // top, which is also when the row is least needed.
+        String suffix = r.fullscreen ? "   \u00B7 full screen"
+                : (parkedBounds.containsKey(Integer.valueOf(r.id)) ? "   \u00B7 parked"
+                : (r.visible ? "" : "   \u00B7 hidden"));
+        t.setText(label + suffix);
+        t.setTextSize(12f);
+        t.setTextColor(r.visible ? theme.textPrimary : theme.textDim);
+        t.setPadding(dp(12), dp(10), dp(12), dp(10));
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        t.setBackground(keyBgState(theme.keyBg, theme.accent));
+        Drawable icon = taskIcon(r.pkg);
+        if (icon != null) {
+            // app icons have no useful intrinsic size here, so give them one
+            icon.setBounds(0, 0, dp(20), dp(20));
+            t.setCompoundDrawables(icon, null, null, null);
+            t.setCompoundDrawablePadding(dp(9));
+        }
+        t.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                tick();
+                activateRow(r, lastRows);
+            }
+        });
+        return t;
+    }
+
+    /**
+     * An app's label, or its package name if the lookup fails.
+     *
+     * Package visibility filtering applies to this process, so without the manifest's
+     * <queries> entry this throws NameNotFound for anything we have not launched
+     * ourselves. The fallback keeps a row readable instead of blank when it does.
+     */
+    private String taskLabel(String pkg) {
+        try {
+            PackageManager pm = getPackageManager();
+            return pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString();
+        } catch (Throwable t) {
+            return pkg;
+        }
+    }
+
+    private Drawable taskIcon(String pkg) {
+        try { return getPackageManager().getApplicationIcon(pkg); }
+        catch (Throwable t) { return null; }
+    }
+
+    /**
+     * Every switchable window on one display: the fullscreen app first, then the floating
+     * ("pop-up view") windows in dump order, which is front-most first.
+     *
+     * Two kinds of line look like a floating window and are not one, and both are real on
+     * this device:
+     *   - freeform ROOT tasks and the per-desktop containers, which are `type=undefined`
+     *     (the containers also report `sz=0`, and carry `dw=activatable` / `dw=minimized`)
+     *   - anything with no `A=<uid>:<pkg>` at all, which has no app behind it
+     *
+     * A real window is `type=standard` with `sz>0`. Filtering on the affinity instead does
+     * NOT work: an activity that ends up in a freeform root task reports its affinity as
+     * `<pkg>.root` - Settings' window does - so that suffix has to be stripped, not read
+     * as a container marker. `type=standard` also excludes the home and recents tasks for
+     * free, which is why they need no special case.
+     *
+     * Only VISIBLE fullscreen tasks are worth a row: a hidden one is a stale recents entry,
+     * and there are dozens of those (this device lists 25 at idle). Visible is also the
+     * right test for "behind the pop-ups", because a task under floating windows is still
+     * being drawn and still reports visible=true.
+     *
+     * The same task can also appear twice, once at top level and once nested under its
+     * root task, so rows are de-duped by id. Display scoping comes from the `Display #N`
+     * section headers: a task header line does not name its display.
+     */
+    private List<TaskRow> parseWindows(String dump, int displayId) {
+        List<TaskRow> out = new ArrayList<TaskRow>();
+        // Held aside and prepended at the end: the dump lists the fullscreen task first and
+        // the floating ones last, which is the opposite of the order the panel wants.
+        List<TaskRow> background = new ArrayList<TaskRow>();
+        if (dump == null || dump.length() == 0) return out;
+        int current = -1;
+        // The row whose bounds we are waiting for; the task's own `mBounds=` line is the
+        // first one after its header, and every other mBounds line in a task's block sits
+        // inside a config dump on a line of its own, so only the first is taken.
+        TaskRow pending = null;
+        String[] lines = dump.split("\n");
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            if (line.indexOf("* Task{") < 0) {
+                int d = line.indexOf("Display #");
+                if (d >= 0) {
+                    current = parseIntOr(nextToken(line, d + 9), -1);
+                } else if (pending != null && pending.bounds == null) {
+                    pending.bounds = parseRect(line);
+                }
+                continue;
+            }
+            if (current != displayId) continue;
+            boolean floating = line.indexOf("mode=freeform") >= 0;
+            boolean fullscreen = line.indexOf("mode=fullscreen") >= 0;
+            if (!floating && !fullscreen) continue;
+            if (line.indexOf("type=standard") < 0) continue;
+            if (line.indexOf("sz=0") >= 0) continue;
+            boolean visible = line.indexOf("visible=true") >= 0;
+            if (fullscreen && !visible) continue;
+
+            int hash = line.indexOf('#');
+            if (hash < 0) continue;
+            int id = parseIntOr(nextToken(line, hash + 1), -1);
+            if (id < 0 || containsTask(out, id) || containsTask(background, id)) {
+                pending = null;   // a duplicate: its bounds block belongs to the row we kept
+                continue;
+            }
+
+            int a = line.indexOf("A=");
+            if (a < 0) continue;
+            String spec = nextToken(line, a + 2);
+            int colon = spec.indexOf(':');
+            if (colon < 0) continue;
+            String pkg = spec.substring(colon + 1);
+            if (pkg.endsWith(".root")) pkg = pkg.substring(0, pkg.length() - 5);
+            if (pkg.length() == 0) continue;
+
+            TaskRow r = new TaskRow();
+            r.id = id;
+            r.pkg = pkg;
+            r.visible = visible;
+            r.fullscreen = fullscreen;
+            if (floating) out.add(r); else background.add(r);
+            pending = r;
+        }
+        // The full-screen app goes FIRST even though it is drawn behind the floating windows.
+        // Being behind is what makes it hard to reach, so it is the row you come here for, and
+        // keeping it last moved it down the panel every time another window was opened.
+        out.addAll(0, background);
+        return out;
+    }
+
+    /** `mBounds=Rect(61, 143 - 1751, 1701)` -> `{61, 143, 1751, 1701}`. */
+    private static int[] parseRect(String line) {
+        int p = line.indexOf("Rect(");
+        if (p < 0) return null;
+        int end = line.indexOf(')', p);
+        if (end < 0) return null;
+        String[] parts = line.substring(p + 5, end).split("[\\s,-]+");
+        if (parts.length < 4) return null;
+        try {
+            return new int[] { Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
+                    Integer.parseInt(parts[2]), Integer.parseInt(parts[3]) };
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static boolean containsTask(List<TaskRow> rows, int id) {
+        for (int i = 0; i < rows.size(); i++) {
+            if (rows.get(i).id == id) return true;
+        }
+        return false;
+    }
+
+    /** The whitespace-delimited token that starts at `from`. */
+    private static String nextToken(String line, int from) {
+        int end = from;
+        while (end < line.length() && !Character.isWhitespace(line.charAt(end))) end++;
+        return line.substring(from, end);
+    }
+
+    private static int parseIntOr(String s, int fallback) {
+        try { return Integer.parseInt(s.trim()); }
+        catch (Throwable t) { return fallback; }
+    }
+
+    /**
+     * Bring a floating window to the front.
+     *
+     * `am task focus` is ActivityTaskManager.setFocusedTask: it moves the task to the
+     * front of its own display and focuses it, which is both what a tap on the window does
+     * and what restores one that is behind another or minimized. It needs
+     * MANAGE_ACTIVITY_TASKS - shell holds it, a third-party app cannot - so it goes over
+     * the existing bridge.
+     *
+     * moveTaskToFront would also work from shell (REORDER_TASKS, plus the exemption from
+     * the background-activity-start check that shell's START_ACTIVITIES_FROM_BACKGROUND
+     * buys), but this build has no `am task move-to-front`, and setFocusedTask clears the
+     * calling identity internally, which sidesteps that check entirely.
+     */
+    /**
+     * Shrink every visible floating window into a strip at the bottom edge, remembering
+     * each one's bounds, and return the shell command that does it (empty if none).
+     *
+     * `am task resize` is the only way to move a floating window - it is refused for
+     * fullscreen tasks, which is fine because only freeform ones are parked. One command
+     * for all of them, so they land together instead of one shell round trip apart.
+     */
+    private String parkCommand(List<TaskRow> rows) {
+        if (rows == null) return "";
+        int[] size = taskDisplaySize();
+        int bottom = size[1];
+        int top = bottom - dp(PARK_H);
+        StringBuilder cmd = new StringBuilder();
+        for (int i = 0; i < rows.size(); i++) {
+            TaskRow r = rows.get(i);
+            if (r.fullscreen || !r.visible || r.bounds == null) continue;
+            if (parkedBounds.containsKey(Integer.valueOf(r.id))) continue;
+            parkedBounds.put(Integer.valueOf(r.id), r.bounds);
+            if (cmd.length() > 0) cmd.append("; ");
+            cmd.append("am task resize ").append(r.id)
+                    .append(" 0 ").append(top)
+                    .append(' ').append(size[0]).append(' ').append(bottom);
+        }
+        return cmd.toString();
+    }
+
+    /**
+     * The size of the display the tasks live on, which is the space their bounds are in.
+     *
+     * Deliberately neither screenW/screenH (captured once at connect, and on this device
+     * they go stale as soon as the phone is folded or unfolded) nor
+     * getCurrentWindowMetrics() (which reports the COVER screen, 904x2316, for this
+     * service even while the unfolded display is the one on screen). A park built on either
+     * came out as `0 2001 904 2316` and put the window off the bottom of a 1812x2176
+     * display - measured 2026-09-27. getDisplay() is not filtered the way getDisplays()
+     * is, so asking for the tasks' own display id gives its real size.
+     */
+    private int[] taskDisplaySize() {
+        try {
+            Display d = displayManager.getDisplay(surfaceDisplayId);
+            if (d != null) {
+                DisplayMetrics m = new DisplayMetrics();
+                d.getRealMetrics(m);
+                if (m.widthPixels > 0 && m.heightPixels > 0) {
+                    return new int[] { m.widthPixels, m.heightPixels };
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "task display size: " + t);
+        }
+        return new int[] { screenW, screenH };
+    }
+
+    /**
+     * Activate a row: raise that window, and for the fullscreen app, get the floating
+     * windows out of its way first.
+     *
+     * A fullscreen row cannot be raised: it lives in the root task BELOW the floating
+     * windows, so focusing it only reorders it within its own root (measured - and the one
+     * API that did reparent it, `am stack move-task`, throws inside system_server and took
+     * the framework down). So the obstruction is moved instead of the window manager being
+     * fought. Any other row is a floating window, which is raisable - and if we parked it,
+     * put it back where it was first.
+     *
+     * Off the main thread, because every branch is at least one shell round trip and the
+     * fullscreen one is three.
+     */
+    private void activateRow(final TaskRow r, final List<TaskRow> rows) {
+        // The window is the point of the tap, so get the panel out of its way first
+        setTasksVisible(false);
+        if (!useShizuku()) { Log.w(TAG, "activate " + r.id + ": shizuku not ready"); return; }
+        final List<TaskRow> snapshot = rows;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    if (r.fullscreen) clearTheDecks(snapshot, r.id);
+                    else {
+                        String back = unparkCommand(r.id);
+                        shellRun((back.length() == 0 ? "" : back + "; ") + "am task focus " + r.id);
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "activate " + r.id + ": " + t);
+                }
+            }
+        }, "pi-task-act").start();
+    }
+
+    /**
+     * Get the floating windows off the fullscreen app, then focus it.
+     *
+     * Minimize is tried first, because it leaves nothing behind: no strip on screen, no
+     * bounds to remember, and the state belongs to Samsung's window manager, so it outlives
+     * a restart of this service. It is a pixel tap on Samsung's chrome, though, so the
+     * result is CHECKED - whatever is still visible afterwards gets parked instead, which is
+     * a pure `am task resize` and always works. A header that moves, or a decor that differs,
+     * therefore degrades into the uglier path instead of into a tap that silently did nothing
+     * - or one that lands on the close button.
+     */
+    private void clearTheDecks(List<TaskRow> rows, int focusId) {
+        if (rows != null) {
+            List<TaskRow> targets = new ArrayList<TaskRow>();
+            StringBuilder taps = new StringBuilder();
+            for (int i = 0; i < rows.size(); i++) {
+                TaskRow r = rows.get(i);
+                if (r.fullscreen || !r.visible || r.bounds == null) continue;
+                if (parkedBounds.containsKey(Integer.valueOf(r.id))) continue;
+                if (taps.length() > 0) taps.append("; ");
+                taps.append("input tap ").append(r.bounds[2] - dp(MINIMIZE_FROM_RIGHT))
+                        .append(' ').append(r.bounds[1] + dp(MINIMIZE_FROM_TOP));
+                targets.add(r);
+            }
+            if (targets.size() > 0) {
+                // Our own overlays swallow a tap that lands on one, and a pop-up's header can
+                // sit under the pad - the same click-through the pad's own taps use, held for
+                // the whole sequence rather than one gesture.
+                ui.post(new Runnable() {
+                    @Override public void run() { setPanelsTouchable(false); }
+                });
+                sleep(TOUCHABLE_SETTLE_MS + 20);
+                shellRun(taps.toString());
+                sleep(MINIMIZE_SETTLE_MS);
+                ui.post(new Runnable() {
+                    @Override public void run() { setPanelsTouchable(true); }
+                });
+
+                List<TaskRow> now = parseWindows(shellRun(TASKS_CMD), surfaceDisplayId);
+                List<TaskRow> stubborn = new ArrayList<TaskRow>();
+                for (int i = 0; i < targets.size(); i++) {
+                    TaskRow fresh = findRow(now, targets.get(i).id);
+                    if (fresh != null && fresh.visible && !fresh.fullscreen) stubborn.add(fresh);
+                }
+                if (stubborn.size() > 0) {
+                    Log.i(TAG, "minimize missed " + stubborn.size() + " window(s) - parking");
+                    String park = parkCommand(stubborn);
+                    if (park.length() > 0) shellRun(park);
+                }
+            }
+        }
+        shellRun("am task focus " + focusId);
+    }
+
+    /** One shell command through the bridge, logged, never throwing. */
+    private String shellRun(String cmd) {
+        try {
+            String out = shizuku.run(cmd).trim();
+            Log.i(TAG, "sh: " + cmd + " -> " + out);
+            return out;
+        } catch (Throwable t) {
+            Log.w(TAG, "sh: " + cmd + " failed: " + t);
+            return "";
+        }
+    }
+
+    private static TaskRow findRow(List<TaskRow> rows, int id) {
+        for (int i = 0; i < rows.size(); i++) {
+            if (rows.get(i).id == id) return rows.get(i);
+        }
+        return null;
+    }
+
+    /** The command that puts a parked window back, or empty if it was never parked. */
+    private String unparkCommand(int id) {
+        int[] b = parkedBounds.remove(Integer.valueOf(id));
+        if (b == null) return "";
+        return "am task resize " + id + " " + b[0] + " " + b[1] + " " + b[2] + " " + b[3];
+    }
+
+    // =========================================================================
+    // CONTROLS panel (the pad's gear dot)
+    // =========================================================================
+
+    /**
+     * What the app shows, and how much keyboard: the panel behind the pad's gear dot.
+     *
+     * The pad's own dot deliberately has no row here. It is the only way to show the pad
+     * (the pad has no close button) and it carries the docked dots that open this panel and
+     * the theme menu, so hiding it would strand the way back to everything. The other two
+     * dots are optional, and the way back once they are hidden is this panel - its own dot
+     * cannot be hidden - or `op=bubbles keys=on,tasks=on`.
+     *
+     * The row wording is the one a TypeSafe (Jev) judgment picked between candidates, glyph
+     * plus what the dot opens: "Keys bubble" scored 0.71 of 2 and "Show the \u25A4 dot" 0.72
+     * (the glyph alone is not enough - 0.36 probability a user cannot tell what it does),
+     * while "Show the \u25A4 windows dot" scored 1.60 and "Favorite shortcuts" was preferred
+     * to "Favorites only" at 0.99. The same judgment put the keys-layout rows here rather
+     * than in the keys panel's own header (0.68 against 0.31, a soft call).
+     */
+    private void buildControlsPanel() {
+        FrameLayout container = new FrameLayout(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout handle = new LinearLayout(this);
+        handle.setGravity(Gravity.CENTER);
+        GradientDrawable hbg = new GradientDrawable();
+        hbg.setCornerRadii(new float[]{dp(theme.radius), dp(theme.radius),
+                dp(theme.radius), dp(theme.radius), 0, 0, 0, 0});
+        hbg.setColor(fill(theme.panelHead));
+        handle.setBackground(hbg);
+        handle.addView(makeChip("\u2699  CONTROLS"));
+        handle.setOnTouchListener(new View.OnTouchListener() {
+            private float dx, dy;
+            @Override public boolean onTouch(View view, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        dx = e.getRawX() - controlsPanelLp.x;
+                        dy = e.getRawY() - controlsPanelLp.y;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        controlsPanelLp.x = (int) (e.getRawX() - dx);
+                        controlsPanelLp.y = (int) (e.getRawY() - dy);
+                        try { wm.updateViewLayout(controlsPanel, controlsPanelLp); } catch (Exception ignored) {}
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        saveGeometry(controlsPanelLp, CONTROLS_KEY);
+                        return true;
+                }
+                return false;
+            }
+        });
+        content.addView(handle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(34)));
+
+        ScrollView scroll = new ScrollView(this);
+        controlsRows = new LinearLayout(this);
+        controlsRows.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(controlsRows, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+        content.addView(scroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        container.addView(content, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        GradientDrawable rbg = new GradientDrawable();
+        rbg.setCornerRadius(dp(theme.radius));
+        rbg.setColor(fill(theme.panelSolid));
+        rbg.setStroke(dp(1.5f), theme.panelStroke);
+        container.setBackground(rbg);
+
+        controlsPanelLp = overlayLp(dp(300), dp(400),
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+        controlsPanel = container;
+
+        addResizeGrips(container, controlsPanelLp, CONTROLS_KEY, true);
+
+        restoreGeometry(controlsPanelLp, CONTROLS_KEY, dp(300), dp(400));
+        try { wm.addView(controlsPanel, controlsPanelLp); }
+        catch (Exception ex) { Log.e(TAG, "controlsPanel", ex); }
+        setControlsVisible(false);
+    }
+
+    private void setControlsVisible(boolean visible) {
+        controlsVisible = visible;
+        if (controlsPanel == null) return;
+        if (visible) {
+            refreshControlsRows();
+            clampGeometryToScreen(controlsPanelLp);
+            raise(controlsPanel, controlsPanelLp, "controlsPanel");
+        }
+        controlsPanel.setVisibility(visible ? View.VISIBLE : View.GONE);
+    }
+
+    private void refreshControlsRows() {
+        if (controlsRows == null) return;
+        controlsRows.removeAllViews();
+        final boolean favorites = "favorites".equals(keysMode);
+
+        controlsRows.addView(sectionLabel("KEYS PANEL"));
+        controlsRows.addView(controlRow("Full keyboard", !favorites, new View.OnClickListener() {
+            @Override public void onClick(View v) { tick(); setKeysMode("full"); }
+        }));
+        controlsRows.addView(controlRow("Favorite shortcuts", favorites, new View.OnClickListener() {
+            @Override public void onClick(View v) { tick(); setKeysMode("favorites"); }
+        }));
+
+        controlsRows.addView(sectionLabel("DOTS"));
+        controlsRows.addView(controlRow("Show the \u2328 keys dot", showKeysBubble,
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { tick(); setBubbleShown(true, !showKeysBubble); }
+                }));
+        controlsRows.addView(controlRow("Show the \u25A4 windows dot", showTasksBubble,
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { tick(); setBubbleShown(false, !showTasksBubble); }
+                }));
+
+        // no section label here: the arrow rows read as links, and it is the difference
+        // between the panel fitting its content and clipping the last row
+        controlsRows.addView(linkRow("How to customize the keys", getString(R.string.help_guide_url)));
+        controlsRows.addView(linkRow("Problems and questions", getString(R.string.help_issues_url)));
+    }
+
+    /** A selectable row, in the same shape as the theme panel's presets. */
+    private TextView controlRow(String label, boolean on, View.OnClickListener action) {
+        TextView t = new TextView(this);
+        t.setText((on ? "\u25C9  " : "\u25CB  ") + label);
+        t.setTextSize(12f);
+        t.setTextColor(on ? theme.textPrimary : theme.textSecondary);
+        t.setPadding(dp(12), dp(11), dp(12), dp(11));
+        t.setBackground(keyBgState(on ? theme.selectedRow : 0x00000000, theme.accent));
+        t.setOnClickListener(action);
+        return t;
+    }
+
+    /** A row that opens something outside the app, which is why it carries no on/off marker. */
+    private TextView linkRow(String label, final String url) {
+        TextView t = new TextView(this);
+        t.setText("\u2197  " + label);
+        t.setTextSize(12f);
+        t.setTextColor(theme.rowAction);
+        t.setPadding(dp(12), dp(11), dp(12), dp(11));
+        t.setBackground(keyBgState(0x00000000, theme.accent));
+        t.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { tick(); openUrl(url); }
+        });
+        return t;
+    }
+
+    /**
+     * Open a URL from an overlay.
+     *
+     * A service has no activity to start one from, and a background activity launch is
+     * exactly what the platform blocks - so it goes over the shell bridge, the same route the
+     * virtual display's seed app takes. Without Shizuku the direct Intent is tried anyway: it
+     * works whenever this app happens to be foreground.
+     */
+    private void openUrl(final String url) {
+        Log.i(TAG, "open " + url);
+        if (useShizuku()) {
+            new Thread(new Runnable() {
+                @Override public void run() {
+                    shellRun("am start -a android.intent.action.VIEW -d " + url);
+                }
+            }, "pi-open-url").start();
+            return;
+        }
+        try {
+            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (Throwable t) {
+            Log.w(TAG, "open " + url + ": " + t);
+        }
+    }
+
+    private void setKeysMode(String mode) {
+        keysMode = "favorites".equals(mode) ? "favorites" : "full";
+        prefs.edit().putString(PREF_KEYS_MODE, keysMode).apply();
+        // Rebuilds every panel, which is what the keys panel needs to change layout.
+        // applyTheme restores this panel's visibility, so its rows survive being tapped.
+        applyTheme();
+        Log.i(TAG, "keys mode -> " + keysMode + " " + keySpecSummary());
+    }
+
+    /**
+     * Show or hide one of the optional dots.
+     *
+     * One setter per change, each rebuilding, so a panel row and the `bubbles` op cannot
+     * drift apart - the op just calls this once per dot it changes.
+     */
+    private void setBubbleShown(boolean keys, boolean on) {
+        if (keys) {
+            showKeysBubble = on;
+            prefs.edit().putBoolean(PREF_SHOW_KEYS_BUBBLE, on).apply();
+        } else {
+            showTasksBubble = on;
+            prefs.edit().putBoolean(PREF_SHOW_TASKS_BUBBLE, on).apply();
+        }
+        applyTheme();
+        Log.i(TAG, "bubbles -> keys=" + showKeysBubble + " windows=" + showTasksBubble);
+    }
+
+    /**
+     * The spec the keys panel is built from.
+     *
+     * Favorites with nothing saved yet falls back to the built-in keyboard rather than
+     * showing an empty panel.
+     */
+    private String activeKeysSpec() {
+        if (!"favorites".equals(keysMode)) return DEFAULT_KEYS_SPEC;
+        return (keysSpec == null || keysSpec.trim().length() == 0) ? DEFAULT_KEYS_SPEC : keysSpec;
+    }
+
+    private static String onOff(boolean b) { return b ? "on" : "off"; }
 }

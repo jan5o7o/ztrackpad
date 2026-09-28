@@ -34,17 +34,43 @@ so any machine with the tools in [Prerequisites](#prerequisites) should do the s
 
 ## The controls
 
-Two floating dots, and four controls docked inside the pad:
+Three floating dots, and five controls docked inside the pad:
 - **`●` (right, default)** — toggles the trackpad
 - **`⌨` (left, default)** — toggles the keys panel
-- Both dots are draggable and, on release, **snap to the nearer vertical edge** — they
+- **`▤` (left, default)** — opens the floating-window list, described below
+- The dots are draggable and, on release, **snap to the nearer vertical edge** — they
   cannot be parked half off the screen, and a short flick no longer counts as a tap.
-- **`◐`, the lock, and `▣`** — the theme menu, the move/resize lock, and the display
-  picker. All three live in the pad, just under its title bar: `◐` and the lock on the
-  left, `▣` on the right. They used to float too, but docked they cannot be lost behind
-  another window — and they stay put when you drag the pad around.
-- **`↑` `↓`** — round buttons on the pad's left edge that nudge the split-screen divider,
-  one 8% step per press. `↑` grows the bottom pane, `↓` shrinks it.
+- **`◐`, the lock, `▣` and the gear** — the theme menu, the move/resize lock, the display
+  picker, and the CONTROLS panel. All four live in the pad, just under its title bar: `◐` and
+  the lock on the left, the gear outermost on the right with `▣` beside it. They used to float
+  too, but docked they cannot be lost behind another window — and they stay put when you drag
+  the pad around.
+- **CONTROLS** (the gear) holds what is a setting rather than a control: whether the keys panel
+  shows the **full keyboard** or your own **favorite shortcuts**, whether each optional dot
+  exists at all, and two links — the keys guide below, and the issue tracker. The pad's own dot
+  has no switch, deliberately: it is the only way to show the pad and it carries the gear, so
+  hiding it would strand the way back.
+
+## Floating windows
+
+Overlapping floating windows had no way to reach each other: the one at the back is simply
+hidden, and nothing on screen names it. `▤` opens a list of them.
+
+- The **full-screen app comes first** — being behind the floating windows is what makes it hard
+  to reach, so it is the row you open the list for — then every floating window on this display,
+  front-most first.
+- **Tap a row to bring that window forward.** A window that was hidden behind another, or
+  minimized, comes back.
+- **Tap the full-screen row** and the floating windows in the way are minimized first, so the
+  app you asked for is actually visible.
+- Rows say what they are: `· full screen`, `· hidden`, or `· parked` if the app had to shrink a
+  window out of the way instead of minimizing it.
+
+It works by reading the window list over the same shell bridge the rest of the app uses, which
+is why it needs Shizuku. Minimizing uses the pop-up's own minimize button — there is no API for
+it — and the result is checked, falling back to shrinking the window into a strip at the bottom
+edge if the tap did not take. Both mechanisms are scriptable: `op=tasks` lists, and
+`op=taskfocus --es arg <id>` does exactly what tapping a row does.
 
 ## Customizing the keys panel
 
@@ -54,6 +80,9 @@ with no rebuild.
 - **`op=keys`** with no argument hands back the layout currently in use, so it can be edited.
 - **`op=keys --es spec '<spec>'`** sets a custom one; **`op=keys-reset`** drops it and returns
   to the built-in keyboard.
+- **`op=keys-mode full|favorites`** — what the gear switches — chooses which of the two the panel
+  shows. `favorites` with nothing saved yet falls back to the built-in layout rather than showing
+  an empty panel.
 
 Format: one key per entry as `label:keycode`, keys separated by `,`, rows by `|`. A key takes
 optional `;`-separated attributes — `m=` a modifier (`ctrl`, `alt`, `shift`), `n=` a repeat
@@ -93,8 +122,8 @@ The shape of the device is why the controls above exist:
 
 That is the whole app on the inner display: the keys panel across the bottom (a custom
 layout, `ESC` through `⌫ back`), the pad down the right edge with its `≡ LOCKED` handle, its
-`◐` / lock / `▣` dots and the `↑`/`↓` split nudges, and the two floating dots on the left
-and right edges. The drawn pointer is up in Termux's tab strip.
+`◐` / lock / `▣` dots, and the two floating dots on the left and right edges. The drawn
+pointer is up in Termux's tab strip.
 
 That arrow is the pointer, injected as a real `SOURCE_MOUSE` — which is why hover, click and
 scroll behave like a desktop's rather than a touchscreen's. **[What it does](#what-it-does)**
@@ -324,12 +353,12 @@ Aim the pointer at the cover screen, an HDMI or XREAL output, or a **virtual dis
 creates itself** — floating in the top half of the phone, or headless off-screen. More in
 [Display picker](#display-picker--drive-another-screen).
 
-### Split nudges, edge scrolling, and a lock
+### Edge scrolling, and a lock
 
-`↑`/`↓` on the pad's left edge move a stacked split's divider by 8% of the screen height; the
-pad's own left and right edges scroll like a laptop's strip; and the lock dot freezes the pad's
-geometry while leaving input alone. *No clip yet* — see [Split screen](#split-screen) and
-[Trackpad layout](#trackpad-layout).
+The pad's own left and right edges scroll like a laptop's strip; and the lock dot freezes the
+pad's geometry while leaving input alone. The split-divider nudge that used to be two buttons
+on the left edge is now `op=split --es arg up|down`. *No clip yet* — see
+[Split screen](#split-screen) and [Trackpad layout](#trackpad-layout).
 
 ### Click-through, so the pad is not an obstruction
 
@@ -374,10 +403,11 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
   control. Edge scrolling still works while locked: the lock is about geometry, not input.
 - **Edge scrolling**: a touch that starts within `dp(28)` of the pad's left or right edge
   scrolls instead of moving the pointer — a laptop-style strip for one finger. It runs at
-  half the two-finger rate in 12px-of-travel steps (see [Trackpad layout](#trackpad-layout)).
-- **Split-screen divider buttons**: `↑`/`↓` on the pad's left edge nudge the divider between
-  a top and bottom pane, via a real injected drag on the divider itself. See
-  [Split screen](#split-screen).
+  a quarter of the two-finger rate in 12px-of-travel steps (see [Trackpad layout](#trackpad-layout)).
+- **Split-screen divider nudge** — `op=split --es arg up|down` moves a stacked split's
+  divider one 8% step, via a real injected drag on the divider itself. It was two round
+  buttons on the pad's left edge until they were dropped for the scroll strip they sat on.
+  See [Split screen](#split-screen).
 - **Display picker** — aim the pointer at any display (cover screen, HDMI/XREAL,
   virtual/overlay) while the panels stay on the phone
 
@@ -386,20 +416,21 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
 ```
         ≡ MOVE              ← drag handle (tap to re-centre; reads ≡ LOCKED when locked)
  ◐ 🔒   ┌─ surface ─────┐   one finger moves · tap = click · hold then move = drag
- ↑ ↓    │              │   the outer dp(28) of each side scrolls instead of moving
+        │              │   the outer dp(28) of each side scrolls instead of moving
         └ ←  ↑  ↓  → ───┘   arrows (hold to repeat)
           ⌫   ⏎   ⋮   ◉      backspace · enter · right-click · pointer toggle
 ```
 
 Gestures: one-finger drag moves the pointer · tap clicks · hold-still-then-move drags ·
 two-finger tap = right-click · two-finger drag = scroll · **swipe up/down along either
-edge = scroll**, which is the same scroll at half the rate in smaller steps, so a side
-swipe is a fine adjustment where the two-finger drag is a coarse one. The `↑`/`↓`
-buttons take over their slice of the left strip.
+edge = scroll**, which is the same scroll at a quarter of the rate in smaller steps, so a
+side swipe is a fine adjustment where the two-finger drag is a coarse one. The left strip
+is all scroll now: the `↑`/`↓` buttons that used to take a slice of it are gone.
 
 Scroll arithmetic, so the feel is predictable: a flush is injected every 12px of finger
-travel on the strip (36px for the two-finger drag), each flush sends `travel × 0.7`
-scroll units, and a flush is capped at those 12px with the remainder carried — so a fast
+travel on the strip (36px for the two-finger drag), each strip flush sends
+`travel × 0.35` scroll units — it was `× 0.7`, and still felt fast — and a flush is capped
+at those 12px with the remainder carried — so a fast
 flick moves in the same small steps rather than one jump. In a list like Settings that is
 roughly 23px of content per step; the conversion from scroll units to pixels belongs to
 the app being scrolled, so a browser may move a different distance.
@@ -531,9 +562,10 @@ exists: **the pointer's position decides which pane gets the click**, and touchi
 also focuses it, so the keys panel then types into that one. Click-through matters more
 here than anywhere else, because the pad usually covers part of a pane.
 
-The `↑`/`↓` buttons on the pad's left edge nudge the divider between a **top and bottom** split, one
-step per press — 8% of the screen height, 174px on this display — and README's usual
-answer applies: `↑` raises the divider so the bottom pane grows.
+The divider between a **top and bottom** split can be nudged one step at a time from a script:
+`op=split --es arg up|down`, 8% of the screen height per step — 174px on this display — and
+README's usual answer applies: `up` raises the divider so the bottom pane grows. It was two
+buttons on the pad's left edge; they were dropped because that edge is the scroll strip.
 
 How it works, and what it will not do:
 
@@ -677,7 +709,7 @@ standalone app.
 - Drag (`press-and-hold then move`) deliberately does **not** use the
   click-through toggle (finger is down on the panel the whole time).
 - **A child view beats the surface under it**, which is why the edge strips are dead
-  under the docked dots, under the `↑`/`↓` buttons, and in the four corner grips.
+  under the docked dots and in the four corner grips.
 - The lock is `LockDot`, drawn by hand rather than typed as `🔒`: an emoji ignores
   `setTextColor` and renders in the font's own colours whatever the theme says. Its one
   icon serves both states on purpose — a control that changes under the finger that just
