@@ -30,12 +30,15 @@ jobs:
         # No setup-android action: the runner image already carries cmdline-tools, and that
         # action fails on it trying to install the long-removed 'tools' package.
         run: |
-          # cmdline-tools is installed but not on PATH in this image, and the version
-          # directory in it is not fixed, so find it rather than guess.
+          # cmdline-tools is installed but not on PATH in this image, and its version
+          # directory is not fixed, so find it rather than guess. GITHUB_PATH, not `export`:
+          # each step gets a fresh shell, and the build needs aapt2/aidl/d8/apksigner from
+          # build-tools.
           sm=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
-          export PATH="$(dirname "$sm"):$PATH"
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" > /dev/null
+          echo "$(dirname "$sm")" >> "$GITHUB_PATH"
+          yes | "$sm" --licenses > /dev/null 2>&1 || true
+          "$sm" --install "platforms;android-36" "build-tools;36.0.0" > /dev/null
+          echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
           ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
 
       - name: Shell syntax
