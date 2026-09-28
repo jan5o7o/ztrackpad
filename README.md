@@ -362,8 +362,7 @@ creates itself** — floating in the top half of the phone, or headless off-scre
 ### Edge scrolling, and a lock
 
 The pad's own left and right edges scroll like a laptop's strip; and the lock dot freezes the
-pad's geometry while leaving input alone. The split-divider nudge that used to be two buttons
-on the left edge is now `op=split --es arg up|down`. *No clip yet* — see
+pad's geometry while leaving input alone. *No clip yet* — see
 [Split screen](#split-screen) and [Trackpad layout](#trackpad-layout).
 
 ### Click-through, so the pad is not an obstruction
@@ -418,10 +417,6 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
 - **Edge scrolling**: a touch that starts within `dp(28)` of the pad's left or right edge
   scrolls instead of moving the pointer — a laptop-style strip for one finger. It runs at
   a quarter of the two-finger rate in 12px-of-travel steps (see [Trackpad layout](#trackpad-layout)).
-- **Split-screen divider nudge** — `op=split --es arg up|down` moves a stacked split's
-  divider one 8% step, via a real injected drag on the divider itself. It was two round
-  buttons on the pad's left edge until they were dropped for the scroll strip they sat on.
-  See [Split screen](#split-screen).
 - **Display picker** — aim the pointer at any display (cover screen, HDMI/XREAL,
   virtual/overlay) while the panels stay on the phone
 
@@ -575,26 +570,6 @@ Both panes are on one display, so nothing in the injection path has to know a sp
 exists: **the pointer's position decides which pane gets the click**, and touching a pane
 also focuses it, so the keys panel then types into that one. Click-through matters more
 here than anywhere else, because the pad usually covers part of a pane.
-
-The divider between a **top and bottom** split can be nudged one step at a time from a script:
-`op=split --es arg up|down`, 8% of the screen height per step — 174px on this display — and
-README's usual answer applies: `up` raises the divider so the bottom pane grows. It was two
-buttons on the pad's left edge; they were dropped because that edge is the scroll strip.
-
-How it works, and what it will not do:
-
-- The geometry comes from `dumpsys window` over the Shizuku bridge, because reading
-  windows through the accessibility API needs `flagRetrieveInteractiveWindows` and this
-  service runs `flagDefault`. Each press is therefore a shell round trip, so the buttons
-  are single-shot rather than hold-to-repeat.
-- The divider is moved by injecting a **touchscreen** drag on its grab area (not a mouse
-  drag — the divider ignores those), with the panels non-touchable during the gesture.
-- The ruler is the **screen**, not the union of the two panes: after a resize the lower
-  pane's window often stops filling its pane, which shrinks a pane-union "area" and makes
-the step wobble.
-- One UI owns the divider, so the landing is not always exactly the 8% asked for, and a
-  *side-by-side* split is refused rather than guessed at. A press with no split logs
-  `split: no divider found` and does nothing.
 
 ## Scripting it
 

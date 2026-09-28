@@ -117,27 +117,6 @@ public class TrackpadService extends AccessibilityService {
     private static final int EDGE_SCROLL_DP = 28;
     private static final long CLICK_MS = 45L;
     /**
-     * How far one press of the split buttons moves the divider, as a percentage of the
-     * screen height. A fixed step, not a rung to hit: the divider does not reliably land
-     * where a drag asks (measured), so a nudge that visibly moves it is worth more than a
-     * target it misses.
-     */
-    private static final float SPLIT_STEP_PERCENT = 8f;
-    /** An injected divider drag: total duration, and how many MOVE steps get it there. */
-    private static final int SPLIT_DRAG_MS = 240;
-    private static final int SPLIT_DRAG_STEPS = 8;
-    /** Keep this much of the split on each side, so a nudge cannot ask for a zero-height pane. */
-    private static final float SPLIT_MIN_PERCENT = 12f;
-    /**
-     * Where to grab the divider relative to its centre, tried in order until the thing
-     * actually moves.
-     *
-     * The grab region the divider window reports and the boundary between the two pane
-     * frames do not agree: measured, a swipe level with the boundary did nothing while one
-     * 25px above it moved the divider. So the grab point is searched rather than assumed.
-     */
-    private static final int[] SPLIT_GRAB_OFFSETS = {0, -25, 25, -50, 50};
-    /**
      * How long to wait before injecting through the panels, and how long the panels then
      * stay non-touchable on top of the gesture itself. Two frames is enough for the window
      * manager to apply FLAG_NOT_TOUCHABLE; the margin covers the round trip back.
@@ -271,8 +250,6 @@ public class TrackpadService extends AccessibilityService {
     private TextView moveChip;
     /** The pad's lock dot, so a theme rebuild can hand back a new one. */
     private LockDot lockDot;
-    /** Set while a split nudge is in flight, so a held button cannot pile them up. */
-    private boolean splitBusy = false;
     /** When true the pad ignores the move handle and every resize grip. */
     private boolean padLocked = false;
     private WindowManager.LayoutParams keysBubbleLp, keysPanelLp;
@@ -1588,16 +1565,6 @@ public class TrackpadService extends AccessibilityService {
             return "ok create-floating " + vdisplayStatus();
         }
 
-        // The split-divider nudge that used to be the pad's two round buttons. Kept
-        // scriptable so the measured drag is still reachable without them. Asynchronous,
-        // like a button press was: it is a `dumpsys` round trip plus an injected drag.
-        if ("split".equals(op)) {
-            String what = (arg == null) ? "" : arg.trim();
-            if (!"up".equals(what) && !"down".equals(what)) return "error: split wants up|down";
-            splitNudge("up".equals(what) ? 1 : -1);
-            return "ok split " + what;
-        }
-
         // The controls panel, like the tasks panel: scriptable so it can be shown without a
         // finger, which is also how it gets verified.
         if ("controls".equals(op)) {
@@ -1686,7 +1653,7 @@ public class TrackpadService extends AccessibilityService {
         }
 
         return "error: unknown op '" + op + "' (status|create|destroy|show|hide|lock|keys"
-                + "|keys-reset|keys-mode|bubbles|controls|split|tasks|taskfocus)";
+                + "|keys-reset|keys-mode|bubbles|controls|tasks|taskfocus)";
     }
 
     /** One line of key=value pairs, for scripts to parse. */
@@ -2332,10 +2299,6 @@ public class TrackpadService extends AccessibilityService {
         // owns that label
         updateModeUi();
 
-        // The two round buttons that nudged a split divider used to be added here, on the
-        // pad's left edge. They are gone from the UI - that edge is the scroll strip, and
-        // that is where a thumb goes - and the nudge is now `op=split --es arg up|down`.
-
         GradientDrawable rbg = new GradientDrawable();
         rbg.setCornerRadius(dp(theme.radius));
         rbg.setColor(fill(theme.padContainer));
@@ -2357,78 +2320,6 @@ public class TrackpadService extends AccessibilityService {
         setPadVisible(false);
     }
 
-    // =========================================================================
-    // Split-screen nudge - script only
-    //
-    // This was two round buttons on the pad's left edge. They are gone from the UI, so the
-    // nudge is reached with `op=split --es arg up|down`. The work below is unchanged and
-    // still measured: see the notes on parseSplit and injectSplitDrag.
-    // =========================================================================
-
-    /**
-     * Two round buttons pinned to the pad's left edge, vertically centred: up moves the
-     * divider up, which grows the BOTTOM pane, and down does the reverse.
-     */
-    /**
-     * Move the split divider one step, from a button press.
-     *
-     * The geometry comes from `dumpsys window` over the existing Shizuku bridge rather than
-     * from AccessibilityWindowInfo: window retrieval needs flagRetrieveInteractiveWindows,
-     * and this service runs flagDefault, while the shell bridge is already here and needs
-     * no permission. The cost is a round trip per press, which is why the work happens on
-     * its own thread.
-     */
-    private void splitNudge(final int dir) {
-        if (splitBusy) { Log.i(TAG, "split: still moving"); return; }
-        if (!useShizuku()) { toast("split: needs Shizuku"); return; }
-        if (targetDisplayId != surfaceDisplayId) { toast("split: not on the target display"); return; }
-        splitBusy = true;
-        new Thread(new Runnable() {
-            @Override public void run() {
-                try {
-                    nudgeSplitInner(dir);
-                } catch (Throwable t) {
-                    Log.w(TAG, "split: " + t);
-                } finally {
-                    splitBusy = false;
-                }
-            }
-        }, "pi-split").start();
-    }
-
-    private void nudgeSplitInner(int dir) {
-        int[] s = parseSplit(shizuku.run("dumpsys window"));
-        if (s == null) { toast("split: no divider found"); return; }
-        if (s[4] != 1) {
-            toast("split: only top/bottom splits are supported");
-            return;
-        }
-        // Span is the screen, not the union of the two panes: the panes' windows shrink when
-        // the lower app letterboxes (measured 1582 of 2176), which would make the step size
-        // wobble. See parseSplit.
-        final int span = screenH;
-        if (span <= 0) { toast("split: odd geometry"); return; }
-        final int divX = s[3];
-        int divY = s[2];
-        int step = Math.round(span * SPLIT_STEP_PERCENT / 100f);
-        int lo = Math.round(span * SPLIT_MIN_PERCENT / 100f);
-        int hi = span - Math.round(span * SPLIT_MIN_PERCENT / 100f);
-        // up = the divider climbs = the bottom pane grows
-        int target = clampInt(divY - dir * step, lo, hi);
-        for (int i = 0; i < SPLIT_GRAB_OFFSETS.length; i++) {
-            injectSplitDrag(divX, divY + SPLIT_GRAB_OFFSETS[i], divX, target);
-            int[] after = parseSplit(shizuku.run("dumpsys window"));
-            if (after == null) { toast("split: divider vanished"); return; }
-            if (Math.abs(after[2] - divY) >= 4) {
-                Log.i(TAG, "split nudge " + (dir > 0 ? "up" : "down") + ": divider " + divY
-                        + " -> " + after[2] + " (wanted " + target + ", grab offset "
-                        + SPLIT_GRAB_OFFSETS[i] + ")");
-                return;
-            }
-        }
-        toast("split: divider would not move");
-    }
-
     /**
      * Drag the divider with a finger.
      *
@@ -2438,80 +2329,6 @@ public class TrackpadService extends AccessibilityService {
      * pad - and the flag has to be in force before the DOWN, so the injection waits for it
      * (the same race that click-through had).
      */
-    private void injectSplitDrag(final float x1, final float y1, final float x2, final float y2) {
-        ui.post(new Runnable() {
-            @Override public void run() { setPanelsTouchable(false); }
-        });
-        sleep(TOUCHABLE_SETTLE_MS + 20);
-        long t = SystemClock.uptimeMillis();
-        shizuku.touch(MotionEvent.ACTION_DOWN, x1, y1, t);
-        for (int i = 1; i <= SPLIT_DRAG_STEPS; i++) {
-            shizuku.touch(MotionEvent.ACTION_MOVE,
-                    x1 + (x2 - x1) * i / (float) SPLIT_DRAG_STEPS,
-                    y1 + (y2 - y1) * i / (float) SPLIT_DRAG_STEPS, t);
-            sleep(SPLIT_DRAG_MS / SPLIT_DRAG_STEPS);
-        }
-        sleep(150);   // arrive without velocity, or the system flings the divider elsewhere
-        shizuku.touch(MotionEvent.ACTION_UP, x2, y2, t);
-        ui.post(new Runnable() {
-            @Override public void run() { setPanelsTouchable(true); }
-        });
-        sleep(300);   // let the system settle before the caller reads the layout back
-    }
-
-    /**
-     * Split geometry from a `dumpsys window` dump, as
-     * `{0, screenH, dividerY, dividerX, 1 if the panes are stacked else 0}`, or null when
-     * nothing looks like a two-pane split.
-     *
-     * The ruler for the ladder is the SCREEN, not the panes. After a resize the lower pane's
-     * window often stops filling its pane - Termux keeps its old height at the top of the
-     * space and leaves dead screen below - so a pane-union "area" shrinks and every rung
-     * comes out wrong. Measured: `area 0..1582 divider 463 share 71%` when the truth was
-     * 77%, which sent the next nudge the wrong way. The top pane and the divider window
-     * agree exactly, so the divider is the only vertical value taken from the windows; the
-     * two biggest app windows are still used to decide *whether* this is a stacked split.
-     *
-     * Windows rather than AccessibilityWindowInfo on purpose: retrieving them needs
-     * flagRetrieveInteractiveWindows and this service runs flagDefault, while the shell
-     * bridge is already here and needs no permission.
-     */
-    private int[] parseSplit(String dump) {
-        if (dump == null) return null;
-        int[] first = null, second = null;
-        int divY = Integer.MIN_VALUE, divX = Integer.MIN_VALUE;
-        for (String line : dump.split("\n")) {
-            int at = line.indexOf("visible windows:");
-            if (at < 0) continue;
-            int br = line.indexOf('[', at);
-            if (br < 0) continue;
-            for (String w : line.substring(br + 1).split(", (?=[0-9a-f]{6,} \\S)")) {
-                int[] r = frameOf(w);
-                if (r == null) continue;
-                String name = nameOf(w);
-                if (name.indexOf("SplitDivider") >= 0) {
-                    divY = (r[1] + r[3]) / 2;
-                    divX = (r[0] + r[2]) / 2;
-                    continue;
-                }
-                if (!isPaneWindow(name, r)) continue;
-                if (first == null || paneArea(r) > paneArea(first)) { second = first; first = r; }
-                else if (second == null || paneArea(r) > paneArea(second)) second = r;
-            }
-        }
-        if (first == null || second == null) return null;
-        // stacked, i.e. one above the other and overlapping sideways: only then does moving
-        // the divider vertically mean anything
-        boolean stacked = (first[3] <= second[1] + 80 || second[3] <= first[1] + 80)
-                && first[0] < second[2] && second[0] < first[2];
-        int left = Math.min(first[0], second[0]), right = Math.max(first[2], second[2]);
-        if (divY == Integer.MIN_VALUE) {
-            divY = (Math.min(first[3], second[3]) + Math.max(first[1], second[1])) / 2;
-        }
-        if (divX == Integer.MIN_VALUE) divX = (left + right) / 2;
-        return new int[]{0, screenH, divY, divX, stacked ? 1 : 0};
-    }
-
     /** Window frames read as `frame=[Rect(l, t - r, b)]`, or null if the entry has none. */
     private static final java.util.regex.Pattern FRAME_RE = java.util.regex.Pattern
             .compile("frame=\\[Rect\\((-?\\d+), (-?\\d+) - (-?\\d+), (-?\\d+)\\)\\]");

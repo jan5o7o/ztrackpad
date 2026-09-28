@@ -215,14 +215,6 @@ button, dropped from the UI for the scroll strip it sat on.
   anything that is not a stacked top/bottom pair. Each press is therefore a shell round trip
   - which is also why the buttons are not repeatable: a hold would queue work that lands
   long after the finger is gone.
-- **The split buttons sit on the left edge-scroll strip** and take over their `dp(58)` of
-  its height, and they are added *before* `addResizeGrips` on purpose - a FrameLayout gives
-  touches to the newest child first, so where a short pad makes them overlap a corner, the
-  grip still wins. **They were dropped from the UI (2026-09-28)** - a thumb on that strip is
-  scrolling, not nudging - so `addSplitButtons`/`splitButton` are gone and the nudge is
-  reached with `op=split --es arg up|down`. `splitNudge`/`nudgeSplitInner`/`parseSplit`/
-  `injectSplitDrag` are unchanged and still measured; only their entry point moved.
-  grip still wins.
 - **A docked dot or grip beats the touch surface underneath it.** The strips live in the
   surface, so the theme/lock dots and the display dot blank out their slice of the top of
   each strip, and the four corner grips own their corners. Fine, but it is why the strip
@@ -355,40 +347,6 @@ this list honest — do not move rows up without actually re-testing.
   middle of the pad moved the screen by 0.4 (pointer only, no scroll). The pad was
   **locked** for that test, which is correct: the lock freezes geometry, not scrolling.
   Injected swipes, so the *feel* (gain/step) is unverified by hand.
-- **Split-divider nudge** (was two round ↑/↓ dots on the pad's *left* edge, `dp(16)` apart;
-  now `op=split --es arg up|down`).
-  Each step moves the divider by a fixed **8% of the screen height** - 174px on this
-  2176px display - with `up` raising it so the BOTTOM pane grows and `down` the reverse. Measured
-  exact over four presses: `1088 -> 914 -> 740` then back `740 -> 914 -> 1088`, each one
-  landing on the wanted value with grab offset 0. Twelve presses across runs have all been
-  exact, so a nudge is trusted where a *target* was not: aiming the divider at a rung of
-  50/75/90% produced landings like `y=150 -> y=1057` and `93% -> 15%`, and One UI snapping
-  or flinging it is the likeliest reason. One press right after `adb install -r` did
-  nothing (service still settling) - retry rather than debug.
-- **`ParseSplit` filters can legitimately find nothing.** `split: no divider found` appeared
-  while the stage was mid-transition and the panes' frames sat at y=-74..3799, i.e. off
-  screen. The windows were there; they just were not panels of a split at that instant.
-- **The ruler is the screen, not the panes**: after a resize the lower pane's window often
-  stops filling its pane (Termux keeps its old height at the top and leaves dead screen
-  below), so a pane-union "area" shrinks - measured `area 0..1582 divider 463 share 71%`
-  when the truth was 77%. The panes are now used only to decide *whether* the split is
-  stacked, and the divider only for where it is.
-- **Click-through works** - a tap with the pointer under one of our own panels does reach the
-  window beneath. Measured in split screen, with the pointer's position verified from its own
-  window frame right before each tap: with focus on the browser pane, a pad click in the
-  Termux pane flipped focus to `com.termux` both **clear of the pad** and **under it**
-  (pointer at `1303,1542`, inside both the pad and the pane). It used to fail the second
-  case - see the `FLAG_NOT_TOUCHABLE` race in the conventions below.
-- **A split-screen pane is chosen by the pointer's position, not by focus** (measured):
-  a pad click lands in whichever pane is under the pointer, and touching a pane also
-  *focuses* it, so keys then follow it. Both panes are one display, so nothing in the
-  injection path needs to know a split exists.
-- **An injected drag does move the split divider**: `input swipe 906 369 906 719` moved
-  the boundary from y=394 to y=892. Swipes *at* the boundary row (394/401) or 25px below
-  it did nothing, so the grab region the divider window reports overshoots the pane edge -
-  use the divider's own `touchableRegion` (`dumpsys window`, the
-  `Embedded{StageCoordinatorSplitDivider}` window, measured (795..1016, 872..926) for a
-  divider at ~900), never the boundary between the two pane frames.
 - **Edge scrolling** runs at a quarter of the two-finger rate, in small flushes:
   `EDGE_SCROLL_FACTOR` 0.25 and `EDGE_FLUSH_PX` 12px of finger travel per flush (against
   `SCROLL_STEP` 36 for the two-finger drag), and a flush is *capped* at that 12px with the
