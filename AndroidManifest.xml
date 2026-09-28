@@ -1,11 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="app.so7o.ztrackpad"
-    android:versionCode="2"
-    android:versionName="0.2">
+    android:versionCode="3"
+    android:versionName="0.4.0">
 
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+        The floating-window list resolves each task's label and icon through
+        PackageManager, and package visibility filtering would otherwise hide every app we
+        did not launch ourselves. A MAIN/LAUNCHER query is the narrow form of this: it
+        covers exactly the apps that can be floating in the first place, and it is not a
+        restricted permission.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:label="So7o Z Trackpad"

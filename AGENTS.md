@@ -12,19 +12,23 @@ Reference environment — everything the verification list below was measured on
 Nothing in the build is device-specific, so another host with the same tools should work;
 read "verified working" at the end of this file as *on that device*.
 
-## Publishing
+## Branches and releases
 
-Development happens in a private repo; `jan5o7o/ztrackpad` is **generated** from it, not
-cloned from it — so edits made in the public tree are overwritten by the next sync. If you
-are reading this in the generated copy, open an issue rather than a pull request.
+`main` is **releases only**: a pull request is required, the `build` check has to pass, and
+nothing may be pushed to it directly — not even by the maintainer. `dev` is where work lands and
+feature branches pull-request into it. Every push to either branch, and every pull request, runs
+`.github/workflows/build.yml`: it installs the platform and build-tools, builds, signs with a
+**throwaway** key, and asserts that no development identity is in the tracked tree or inside
+`classes.dex`. It cannot run `tests/smoke.sh` — that needs a device — so the device checks stay
+manual, which is the whole reason the verification list below exists.
 
-In the development repo, **read `PUBLISHING.md` before any work that ends in a public
-deployment**: it covers the local `public` branch, the three trees, the `ztrackpad-sync`
-guards (dirty worktree, private-string leak scan, generated-path pre-flight), the
-invariants (no secret in a tracked file, rebranding only ever happens on `public`), the
-merge-never-rebase trap, and the runbook for pulling something back out of a public history
-that already has it. `PUBLISHING.md` is private-only and is excluded from the export,
-so it is absent from the generated tree by design.
+Release steps live in [RELEASING.md](RELEASING.md).
+
+Two invariants matter more than the tooling: **no secret in a tracked file** (the signing
+password comes from `$KSPASS` or `~/.ztrackpad-kspass`, nowhere else), and **the release keystore
+never enters the repository** — it is what lets an existing install update in place, and losing it
+means no install can ever update again. Screenshots and recordings need the same care, because
+every check here reads text and cannot see inside an image.
 
 ## What an agent cannot do here
 
@@ -111,7 +115,26 @@ adb shell am broadcast -n app.so7o.ztrackpad/.VDisplayReceiver -a app.so7o.ztrac
 Ops: `status`, `create` (+`--ez headless true`), `show`, `hide`, `destroy`, `keys`
 (`--es spec '<layout>'`, no spec = read it back), `keys-reset`, and `lock`
 (`--es arg on|off|toggle`) - the lock is the one non-display op, and it drives the same
-`setPadLocked` the pad's lock dot does, so the two cannot disagree.
+`setPadLocked` the pad's lock dot does, so the two cannot disagree. `tasks` (no arg) lists
+the floating ("pop-up view") windows on the display the panels live on, and with
+`--es arg show|hide|toggle` drives the panel that lists them; `taskfocus --es arg <TASK_ID>`
+brings one to the front. `tasks` replies `ok tasks n=<count> display=<d>` followed by
+`<id>:<pkg>:<visible|hidden>:<floating|fullscreen>` per window. `keys-mode` (`full`, or
+`favorites` to use the saved custom layout) and `bubbles` (`keys=on|off,tasks=on|off`) mirror
+the CONTROLS panel's rows - same setters, so a finger and a script cannot disagree - and
+`controls --es arg show|hide|toggle` is that panel. `split --es arg up|down` is the old pad
+button, dropped from the UI for the scroll strip it sat on.
+
+- **The pad's own dot has no on/off pref, deliberately.** It is the only way to show the pad
+  (which has no close button) and it carries the gear, so hiding it would strand the way back
+  to everything, including the row that would un-hide it. `⌨` and `▤` are the optional ones;
+  the escape hatch if both are hidden is `op=bubbles` or MainActivity.
+- **The panel's HELP rows point at the PUBLIC repo**, as `res/values/strings.xml` strings
+  (`help_guide_url`, `help_issues_url`), so they need no rebranding if this tree is exported,
+  and a missing anchor degrades to the top of the README instead of 404ing. The row wording
+  was picked by a TypeSafe (Jev) judgment: "Show the ▤ windows dot" 1.60 of 2 where "Keys
+  bubble" scored 0.71 and "Show the ▤ dot" 0.72, and "Favorite shortcuts" over "Favorites
+  only" at 0.99. That is a judgment, not a measurement.
 
 - **The `-n` component is mandatory**: an implicit broadcast never reaches a
   manifest-declared receiver on API 26+, and the failure is silent (result=0 with no
@@ -195,6 +218,10 @@ Ops: `status`, `create` (+`--ez headless true`), `show`, `hide`, `destroy`, `key
 - **The split buttons sit on the left edge-scroll strip** and take over their `dp(58)` of
   its height, and they are added *before* `addResizeGrips` on purpose - a FrameLayout gives
   touches to the newest child first, so where a short pad makes them overlap a corner, the
+  grip still wins. **They were dropped from the UI (2026-09-28)** - a thumb on that strip is
+  scrolling, not nudging - so `addSplitButtons`/`splitButton` are gone and the nudge is
+  reached with `op=split --es arg up|down`. `splitNudge`/`nudgeSplitInner`/`parseSplit`/
+  `injectSplitDrag` are unchanged and still measured; only their entry point moved.
   grip still wins.
 - **A docked dot or grip beats the touch surface underneath it.** The strips live in the
   surface, so the theme/lock dots and the display dot blank out their slice of the top of
@@ -251,8 +278,34 @@ Ops: `status`, `create` (+`--ez headless true`), `show`, `hide`, `destroy`, `key
 - Click-through (`injectThroughPanels`) drops `FLAG_NOT_TOUCHABLE` for ~110ms
   while injecting; only used from tap paths (finger already up). The drag path
   must NOT use it.
-- `screencap` on this device defaults to the **cover screen**; use
-  `screencap -d <HWC-display-id>` (see `dumpsys SurfaceFlinger --display-id`).
+- `screencap` on this device defaults to the **cover screen**, and `-d` takes the display
+  **uniqueId**, not the HWC id: `-d 0` and `-d 3` both fail with `Display Id 'x' is not
+  valid`, while `-d 4630946474867211650` (from `dumpsys SurfaceFlinger --display-id`)
+  works.
+- **A floating window is minimized by tapping its own `-` button**, at
+  `right - dp(124), top + dp(22)` of the task's `mBounds` (measured 2026-09-27: a window at
+  `300,300 - 1500,1500` has it at `1220,350`; tapping it gives `visible=false` with the task
+  still alive, still `mode=freeform`, and `translucent=true` as the tell). There is **no
+  minimize API** on this build: nothing in `cmd activity` beyond
+  `lock`/`resize`/`resizeable`/`focus`, nothing per-task in `cmd window`/`wm` (only
+  `set-display-windowing-mode`), and no `minimiz` anywhere in AOSP's `Task.java` - the state
+  belongs to Samsung's multi-window and Google's wm-shell. So the floating-window list
+  minimizes by injecting that tap, then re-reads the list and parks whatever is still
+  visible (`am task resize`, which always works), so a chrome change degrades instead of
+  silently doing nothing. `am task focus <id>` restores a minimized window - verified for
+  `visible=false` freeform tasks.
+- **Panel default positions can be baked** without fighting a layout the user already set:
+  `restoreGeometryAt` applies its x/y only when no pref is saved, so it decides where a
+  fresh install first appears and leaves an existing drag alone. The tasks panel's default
+  is `dp(173), dp(509)`, taken from where it was put by hand.
+- **Never call `am stack move-task`.** It does move the task, and then throws
+  `ClassCastException: TaskFragment cannot be cast to Task` in
+  `Task.resumeTopActivityUncheckedLocked` *inside system_server*, which took system_server
+  down and restarted the framework (measured 2026-09-27: wireless adb died and needed a new
+  port and a fresh pairing, every floating task was lost). The legacy `stack` command is
+  broken on Android 16's TaskFragment hierarchy. App processes survive a system_server
+  restart (they are forked from zygote), which is why Termux and Shizuku came through it -
+  but the framework, the window state and the adb session do not.
 
 ## Verification status
 
@@ -302,9 +355,10 @@ this list honest — do not move rows up without actually re-testing.
   middle of the pad moved the screen by 0.4 (pointer only, no scroll). The pad was
   **locked** for that test, which is correct: the lock freezes geometry, not scrolling.
   Injected swipes, so the *feel* (gain/step) is unverified by hand.
-- **Split-divider buttons** (the two round ↑/↓ dots on the pad's *left* edge, `dp(16)` apart).
-  Each press nudges the divider by a fixed **8% of the screen height** - 174px on this
-  2176px display - with ↑ raising it so the BOTTOM pane grows and ↓ the reverse. Measured
+- **Split-divider nudge** (was two round ↑/↓ dots on the pad's *left* edge, `dp(16)` apart;
+  now `op=split --es arg up|down`).
+  Each step moves the divider by a fixed **8% of the screen height** - 174px on this
+  2176px display - with `up` raising it so the BOTTOM pane grows and `down` the reverse. Measured
   exact over four presses: `1088 -> 914 -> 740` then back `740 -> 914 -> 1088`, each one
   landing on the wanted value with grab offset 0. Twelve presses across runs have all been
   exact, so a nudge is trusted where a *target* was not: aiming the divider at a rung of
@@ -335,16 +389,19 @@ this list honest — do not move rows up without actually re-testing.
   use the divider's own `touchableRegion` (`dumpsys window`, the
   `Embedded{StageCoordinatorSplitDivider}` window, measured (795..1016, 872..926) for a
   divider at ~900), never the boundary between the two pane frames.
-- **Edge scrolling** runs at half the two-finger rate, in small flushes: `EDGE_SCROLL_FACTOR`
-  0.5 and `EDGE_FLUSH_PX` 12px of finger travel per flush (against `SCROLL_STEP` 36 for the
-  two-finger drag), and a flush is *capped* at that 12px with the leftover carried, so a fast
-  flick arrives in the same small steps instead of one jump. Verified through the injected
-  values with a temporary log: a 100px swipe over 450ms produced `-8` eight times (64 units,
-  the whole travel accounted for), and over 120ms three times (24 units) - 8 = 12 x 0.7,
-  where SCROLL_STEP-sized flushes sent 26.
+- **Edge scrolling** runs at a quarter of the two-finger rate, in small flushes:
+  `EDGE_SCROLL_FACTOR` 0.25 and `EDGE_FLUSH_PX` 12px of finger travel per flush (against
+  `SCROLL_STEP` 36 for the two-finger drag), and a flush is *capped* at that 12px with the
+  leftover carried, so a fast flick arrives in the same small steps instead of one jump.
+  The factor scales only the injected distance, never the travel accounting - a flush
+  consumes 12px whatever the gain - which is why it is the one knob for "how far does the
+  page move". Verified twice through the injected values with a temporary log, same 100px
+  swipe: at 0.5 it produced `-8.4` eight times (**64 units**, and still felt fast), and at
+  0.25 it produces `-4.2` eight times (**33.6 units**, ~0.35px of content per px of finger)
+  with the whole 100px of travel still accounted for.
 - **The throttle is what a fast flick loses to.** `SCROLL_THROTTLE` is 40ms for both paths, so
-  a 120ms flick gets three flushes: 24 units where the travel implies ~70, down from 39 when
-  the flush was 18px. If the strip feels dead on quick flick, shorten the throttle for the edge
+  a 120ms flick gets three flushes: ~13 units where the travel implies ~35. If the strip feels
+  dead on quick flick, shorten the throttle for the edge
   path rather than enlarging the flush - the increment size is what was asked for.
 - **The two-finger path is untouched** by any of that: `scrollBy(dy)` still uses `SCROLL_GAIN`
   1.4 with a 36px step and no cap. `scrollBy(dy, gain, step, capFlush)` is the shared engine.
@@ -363,6 +420,17 @@ this list honest — do not move rows up without actually re-testing.
 - **Display picker**: enumerates displays the public API hides — cover screen found
   by id probing, logged as `enumerate: public=1 probed=1 swept=0 total=2`, i.e. no
   Shizuku needed for enumeration.
+- **The two displays SWAP IDS WHEN FOLDED**, so never treat an id as "the cover screen".
+  Folded: **display 0 = 904x2316 with `canHostTasks=true`** and display 1 = 1812x2176
+  with `canHostTasks=false`; unfolded it is the exact reverse (`wm size` +
+  `dumpsys display` + `dumpsys window displays`, measured 2026-09-27). This is why
+  `surfaceDisplayId` must stay `Display.DEFAULT_DISPLAY` - it follows the active screen
+  for free - and why any window geometry computed in "the" display space has to be read
+  from the display the window is actually on, at the moment of use. Caching it at
+  service connect (`screenW`/`screenH`) is wrong the moment the phone is folded or
+  unfolded, and `getCurrentWindowMetrics()` follows the active screen too, so it does
+  not help for a task on the other one. `DisplayManager.getDisplay(id).getRealMetrics()`
+  is the one that answers per-display.
 - **Retarget**: picking display 1 logs `target display -> 1 (Built-in Screen)
   904x2316`, and back to `-> 0 ... 1812x2176`. Sizes come from the chosen display,
   not the surface.
