@@ -72,6 +72,12 @@ it — and the result is checked, falling back to shrinking the window into a st
 edge if the tap did not take. Both mechanisms are scriptable: `op=tasks` lists, and
 `op=taskfocus --es arg <id>` does exactly what tapping a row does.
 
+[![The floating-window list: Termux marked full screen, Chrome Beta parked, then the hidden
+ones](docs/media/ztrackpad-0.4.0-poster.png)](https://youtube.com/shorts/FNPXTtWwO3I)
+
+*[Watch the 0.4.0 walkthrough on YouTube](https://youtube.com/shorts/FNPXTtWwO3I)* — the list,
+the CONTROLS panel, and the keys switch, on the unfolded screen.
+
 ## Customizing the keys panel
 
 The keys panel is data, not code: its layout is a **spec string** you can replace at runtime,
@@ -130,7 +136,7 @@ scroll behave like a desktop's rather than a touchscreen's. **[What it does](#wh
 below walks the features with a clip for each one that has footage.
 
 The recordings are in `docs/media/`: [driving a browser](docs/media/demo-browser.mp4) (75s),
-[Termux with the keys panel](docs/media/demo-termux.mp4) (57s) and [creating a display](docs/media/demo-vdisplay.mp4)
+[Termux with the keys panel](docs/media/demo-termux.mp4) (57s) and [creating a display](docs/media/demo-vdisplay.mp4), and [the 0.4.0 walkthrough on YouTube](https://youtube.com/shorts/FNPXTtWwO3I) (1:22)
 (75s) — each one cut where the screen showed something personal, noted in
 [docs/screenshots](docs/screenshots/README.md). Those are plain links, and
 GitHub serves a committed `.mp4` as a download rather than playing it, so they fetch the file.
