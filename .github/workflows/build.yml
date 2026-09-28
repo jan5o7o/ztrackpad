@@ -26,10 +26,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-
       - name: Platform and build-tools
-        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0" > /dev/null
+        # No setup-android action: the runner image already carries cmdline-tools, and that
+        # action fails on it trying to install the long-removed 'tools' package.
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" > /dev/null
+          echo "ANDROID_HOME=$ANDROID_HOME"; ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
 
       - name: Shell syntax
         run: |
