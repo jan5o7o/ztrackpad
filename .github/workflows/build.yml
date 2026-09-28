@@ -19,9 +19,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -83,7 +83,7 @@ jobs:
       - name: Keep the APK for inspection
         # Signed with the throwaway key, so it is NOT the release artefact and cannot update an
         # install of it. Useful when a run fails on the device side of a change.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ztrackpad-ci-build
           path: out/ztrackpad.apk
