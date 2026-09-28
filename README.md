@@ -46,6 +46,32 @@ Two floating dots, and four controls docked inside the pad:
 - **`↑` `↓`** — round buttons on the pad's left edge that nudge the split-screen divider,
   one 8% step per press. `↑` grows the bottom pane, `↓` shrinks it.
 
+## Customizing the keys panel
+
+The keys panel is data, not code: its layout is a **spec string** you can replace at runtime,
+with no rebuild.
+
+- **`op=keys`** with no argument hands back the layout currently in use, so it can be edited.
+- **`op=keys --es spec '<spec>'`** sets a custom one; **`op=keys-reset`** drops it and returns
+  to the built-in keyboard.
+
+Format: one key per entry as `label:keycode`, keys separated by `,`, rows by `|`. A key takes
+optional `;`-separated attributes — `m=` a modifier (`ctrl`, `alt`, `shift`), `n=` a repeat
+count, which is how the tmux `CTRL+b b` macro is written. A label may itself contain `:` or
+`;` if it is escaped with a backslash.
+
+```bash
+adb shell am broadcast -n app.so7o.ztrackpad/.VDisplayReceiver \
+  -a app.so7o.ztrackpad.VDISPLAY --es op keys --es spec \
+  'CTRL:mod;m=ctrl,c:c;m=ctrl,v:v;m=ctrl,a:a;m=ctrl,\u232B:del|ESC:escape,TAB:tab'
+```
+
+Keycodes the app knows by name: `escape`, `tab`, `enter`, `del`, `move_home`, `move_end`, plus
+any single character.
+
+**Stuck, or something broken?** Open an issue: <https://github.com/jan5o7o/ztrackpad/issues>,
+and include the line `op=status` prints.
+
 ## A foldable, unfolded
 
 The shape of the device is why the controls above exist:
