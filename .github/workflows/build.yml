@@ -30,9 +30,13 @@ jobs:
         # No setup-android action: the runner image already carries cmdline-tools, and that
         # action fails on it trying to install the long-removed 'tools' package.
         run: |
+          # cmdline-tools is installed but not on PATH in this image, and the version
+          # directory in it is not fixed, so find it rather than guess.
+          sm=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
+          export PATH="$(dirname "$sm"):$PATH"
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" > /dev/null
-          echo "ANDROID_HOME=$ANDROID_HOME"; ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
 
       - name: Shell syntax
         run: |
