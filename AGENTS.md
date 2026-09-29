@@ -84,6 +84,7 @@ closed when neither is present.
 | `java/.../VDisplayReceiver.java` | broadcast entry point so scripts can create/show/hide/destroy the virtual display |
 | `java/.../Theme.java` | the five visual presets and every themed colour/radius |
 | `skills/ztrackpad-vdisplay/` | pi skill + `scripts/vdisplay` for driving it from Termux |
+| `skills/ztrackpad-vdisplay-launch/` | pi skill for putting an app on that display and verifying it from pixels |
 | `extensions/vdisplay.ts` | pi extension exposing that script as a `vdisplay` tool |
 | `aidl/.../IShellService.aidl` | binder interface between the two |
 | `build.sh` | the hand-rolled build pipeline |
