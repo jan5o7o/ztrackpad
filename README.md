@@ -51,6 +51,8 @@ Three floating dots, and five controls docked inside the pad:
   has no switch, deliberately: it is the only way to show the pad and it carries the gear, so
   hiding it would strand the way back.
 
+![The THEME and CONTROLS panels open side by side over the home screen: five presets with High contrast selected and the opacity slider at 48%, beside the keys-panel choice, the two dot switches, and links to the keys guide and the issue tracker](docs/screenshots/theme-and-controls.jpg)
+
 ## Floating windows
 
 Overlapping floating windows had no way to reach each other: the one at the back is simply
@@ -137,7 +139,7 @@ below walks the features with a clip for each one that has footage.
 
 The recordings are in `docs/media/`: [driving a browser](docs/media/demo-browser.mp4) (75s),
 [Termux with the keys panel](docs/media/demo-termux.mp4) (57s) and [creating a display](docs/media/demo-vdisplay.mp4), and [the 0.4.0 walkthrough on YouTube](https://youtube.com/shorts/FNPXTtWwO3I) (1:22)
-(75s) — each one cut where the screen showed something personal, noted in
+— each one cut where the screen showed something personal, noted in
 [docs/screenshots](docs/screenshots/README.md). Those are plain links, and
 GitHub serves a committed `.mp4` as a download rather than playing it, so they fetch the file.
 
@@ -706,6 +708,11 @@ tapped it reads as a glitch, so the *handle's* word is the state (`≡ MOVE` / `
 - The pad's gesture grammar is decided at `ACTION_DOWN`, never on first move: the hold
   timer, the tap-then-drag window and the edge strip all claim a touch there, or a slow
   press would be misread as a drag.
+- **The icon is the app's own pointer, and nothing else.** The artwork it is cut from draws the
+  whole pad — title bar, dots, key grid, arrow — and at 48 px that is an unreadable smudge, so
+  the launcher gets the arrow alone and the rest stays in the artwork. It is an adaptive icon
+  (`mipmap-anydpi-v26`), so the launcher supplies the shape, with a monochrome layer for
+  Android 13's themed icons; `minSdk` is 30, so nothing needs a legacy density-bucket fallback.
 
 ## Licence
 

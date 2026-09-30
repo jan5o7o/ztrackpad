@@ -11,6 +11,25 @@ it can only ever describe the app as shipped.
 
 Nothing yet.
 
+## 0.5.0 — 2026-09-30
+
+**A face for the launcher, and the last of the split-divider code out of the build.** 0.4.0's
+notes said the split-divider buttons were gone from the pad, which was true of the pad; the code
+that nudged the divider itself was still in the APK that shipped. This is the release where both
+are gone.
+
+- **The app has an icon.** It shipped without one, so the launcher drew its own placeholder. The
+  icon is the pointer the app already draws on screen, reduced to what survives a launcher's mask
+  at 48px: an adaptive icon, so the launcher supplies the shape, with a monochrome layer for
+  Android 13's themed icons.
+- **The `split` broadcast op is gone**, so nothing on the pad's scroll strip is a button any more.
+- **The APK's uncompressed entries are packed 4-byte aligned** instead of landing wherever the
+  packer happened to put them. The earlier builds passed that check by luck — a new icon file was
+  enough to fail it, which is how it was found.
+- The README's hero clip and its screenshots are retaken from a recording of the app in use,
+  including one of the CONTROLS panel, and the notes on what was cut from that recording are
+  updated with them.
+
 ## 0.4.0 — 2026-09-28
 
 **Getting back to a window that is hidden behind other windows.** Floating windows had no way to

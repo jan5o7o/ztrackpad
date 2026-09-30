@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Adaptive icon: a background colour layer plus the arrow as the foreground, so the launcher
+    supplies the shape and the arrow survives every mask. minSdk is 30, so every install can
+    render this and no legacy density-bucket icon is needed.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <!-- Android 13 themed icons: the same arrow, tinted by the system -->
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

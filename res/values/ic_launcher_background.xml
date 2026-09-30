@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        The launcher icon's backdrop: the same black the icon artwork already used, so the
+        foreground arrow composites onto it without a seam. Change this one value to restyle
+        the icon (the app's accent is #2A6FB0).
+    -->
+    <color name="ic_launcher_background">#FF000000</color>
+</resources>
