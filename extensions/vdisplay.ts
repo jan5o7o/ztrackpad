@@ -20,7 +20,7 @@ const run = promisify(execFile);
 const CANDIDATES = [
 	process.env.VDISPLAY_SCRIPT,
 	join(homedir(), ".pi", "skills", "ztrackpad-vdisplay", "scripts", "vdisplay"),
-	join(homedir(), "trackpad", "skills", "ztrackpad-vdisplay", "scripts", "vdisplay"),
+	join(homedir(), "ztrackpad", "skills", "ztrackpad-vdisplay", "scripts", "vdisplay"),
 ].filter((p): p is string => typeof p === "string" && p.length > 0);
 
 function scriptPath(): string {

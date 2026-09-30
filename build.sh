@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hand-rolled Android build. Written and run in Termux/aarch64 (a Galaxy Z Fold 4); needs
-# only aapt2, aidl, javac, d8, apksigner, zip and python3, so any host with those will do.
+# only aapt2, aidl, javac, d8, apksigner and python3, so any host with those will do.
 # aapt2 (compile+link) -> aidl -> javac -> d8 -> package -> apksigner
 set -euo pipefail
 
@@ -74,9 +74,38 @@ echo "==> 4/6 d8"
 d8 --lib "$ANDROID_JAR" --min-api "$MIN_SDK" --output "$BUILD/dex" @"$BUILD/inputs.txt"
 
 echo "==> 5/6 package"
-cp "$BUILD/base.apk" "$OUT/ztrackpad-unsigned.apk"
-cd "$BUILD/dex" && zip -q -X "$OUT/ztrackpad-unsigned.apk" classes.dex
-cd "$ROOT"
+# Pack the APK ourselves rather than `cp` + `zip`, because an uncompressed entry has to start
+# on a 4-byte boundary and nothing here provides zipalign. Where aapt2 stored a file (it keeps
+# small PNGs uncompressed) the offset is padded with an extra-field block readers ignore, so
+# the alignment check below is a guarantee instead of a coincidence.
+python3 - "$BUILD/base.apk" "$BUILD/dex/classes.dex" "$OUT/ztrackpad-unsigned.apk" <<'PY'
+import sys, zipfile, struct
+
+base, dex, out = sys.argv[1], sys.argv[2], sys.argv[3]
+STAMP = (2008, 1, 1, 0, 0, 0)   # fixed mtime, so one tree gives one APK
+PAD_ID = 0xD935                 # zipalign's alignment-padding extra field
+
+def entries(base):
+    with zipfile.ZipFile(base) as src:
+        for info in src.infolist():
+            yield info, src.read(info.filename)
+
+with open(out, "wb") as f:
+    dst = zipfile.ZipFile(f, "w")
+    items = list(entries(base)) + [(None, open(dex, "rb").read())]
+    for info, data in items:
+        name = info.filename if info else "classes.dex"
+        stored = bool(info) and info.compress_type == zipfile.ZIP_STORED
+        zi = zipfile.ZipInfo(name, info.date_time if info else STAMP)
+        zi.compress_type = zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED
+        zi.external_attr = info.external_attr if info else 0o644 << 16
+        if stored:
+            zm = (-(f.tell() + 30 + len(name))) % 4      # bytes wanted before the data
+            extra = zm + 4                               # +4: a TLV record needs a header
+            zi.extra = struct.pack("<HH", PAD_ID, extra - 4) + bytes(extra - 4)
+        dst.writestr(zi, data)
+    dst.close()
+PY
 
 echo "==> 5b/6 alignment report"
 python3 - "$OUT/ztrackpad-unsigned.apk" <<'PY'

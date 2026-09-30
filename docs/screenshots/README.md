@@ -1,12 +1,15 @@
 # Screenshots and recordings
 
 Taken on the reference device — Galaxy Z Fold 4 (SM-F936B), Android 16 / One UI — on the
-**unfolded inner display**, 1812×2176.
+**unfolded inner display**. The older pair are 1812×2176 `screencap`s; the two retaken for
+0.5.0 are 1080×1298 frames of a screen recording, which is coarser but keeps the same aspect
+(1080 = 0.596 × 1812), and the recording is the only source that shows the 0.4 build in use.
 
 | file | what it shows |
 |---|---|
-| `fold4-unfolded.jpg` | the whole app in use: keys panel, pad with `≡ LOCKED`, docked dots, split nudges, floating dots, pointer |
-| `theme-and-display-picker.jpg` | the theme menu with the opacity slider, and the display picker listing both built-in screens plus the two virtual-display options |
+| `fold4-unfolded.jpg` | the whole app in use, taken at 45.8s of the 0.4 screen recording: keys panel, pad with `≡ MOVE`, docked dots, floating dots and pointer, over a Termux session with this repo's own README in a browser pane beside it |
+| `theme-and-controls.jpg` | the THEME and CONTROLS panels open together at 32.0s of the same recording: five presets, the opacity slider at 48%, the keys-panel choice (**full keyboard** / favorite shortcuts) and the two dot switches |
+| `theme-and-display-picker.jpg` | the theme menu with the opacity slider, and the display picker listing both built-in screens plus the two virtual-display options — unchanged, because the picker never appears in the 0.4 recording |
 
 Recordings live in `../media/`. Each is cut where the screen showed something personal — the
 windows are listed under **Cutting footage** below:
@@ -18,12 +21,13 @@ windows are listed under **Cutting footage** below:
 | `demo-vdisplay.mp4` | 75s | the display picker, the floating display it creates, and apps driven on that display |
 
 Compact GIFs are embedded in the README, because a GIF is the only medium that animates inline
-(see below). The first two are cut from the recordings above; the third has its own source, noted
-under the table:
+(see below). `demo-termux.gif` is cut from `demo-termux.mp4`, `demo-vdisplay.gif` from
+`demo-vdisplay.mp4`, and the hero from the 0.4 screen recording, which is not committed — it is
+published as the walkthrough on YouTube, and the two stills above come from the same file.
 
 | gif | size | cut | shows |
 |---|---|---|---|
-| `demo.gif` | 0.14 MB | browser 11.2–15s | the pointer driving this repo's GitHub page, keys panel and pad over Termux |
+| `demo.gif` | 0.15 MB | 0.4 recording 44.0–46.5s | the pointer driving this repo's GitHub page in a browser pane, with the keys panel across the bottom and the pad down the right edge over a Termux session |
 | `demo-termux.gif` | 0.27 MB | termux 28.5–35.5s | the theme menu with the preset switching from Default to High contrast |
 | `demo-vdisplay.gif` | 0.64 MB | vdisplay 16–20.5s | creating a floating display, then the new display up with its own launcher |
 
@@ -33,6 +37,11 @@ a GIF cut at the tail would have republished exactly what was removed. That foot
 the recording itself now (see **Cutting footage** below), so the tail is safe for new cuts — but
 the window stands for the source clips these GIFs came from, and OCR is still not the check: at
 540 px it read that line as gibberish and reported no match.
+
+**Cut the hero window from the 0.4 recording at 44.0–46.5 s.** Two things sit just past it in
+that footage: a `New tab` chip the browser draws from 46.6 s, and a link-hover box over the
+README's code blocks from 47.4 s. A longer window would loop with a popup halfway through, so
+the hero is shorter than the 3.8 s clip it replaced — it is the clean run of that shot.
 
 **Cut the browser clip inside 11.2–15 s.** It cross-fades twice while the split layout settles,
 around 10.4–11.1 s and 15.25–15.75 s, and frames inside a fade are blended and unusable — an
@@ -107,3 +116,18 @@ To re-check a recording, sample it at full resolution every 2s and OCR every fra
 sweep as necessary and not sufficient: OCR missed the browser's suggestion list at 1s sampling and
 caught it at 2s, and it read two of three frames of the display panel as empty. Frames around an
 address bar are for eyes.
+
+The 0.4 recording — `So7oZTrackpadV04.mp4`, 81.6 s, 1080×1298, the same file published as the
+YouTube walkthrough — contributes the hero and both retaken stills. It is **not** committed, so
+what the repo keeps of it is the three published cuts above. Two of its windows are deliberately
+not published, both for text only an eye can see:
+
+- **64–68 s** — the browser's own tab strip is showing tab titles (`Pag…`, `Hear…`, `dhar…`),
+  which read like personal ones even though the address bar under them names this public repo.
+- **74–81.6 s** — a YouTube home feed, and the floating-window list naming which browsers were
+  open.
+
+It carries no kernel build string: an OCR sweep every 2 s over the whole 81.6 s found none, and
+its Termux panes show this repo's own file listing. The frames around the published windows were
+still read at full resolution — the address-bar and taskbar strips above each one included —
+because that is the check the private-string scan cannot do.
