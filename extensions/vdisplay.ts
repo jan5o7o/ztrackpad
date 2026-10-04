@@ -54,8 +54,12 @@ const vdisplayTool = defineTool({
 		"bridge, so it also works for headless displays. 'target' points the trackpad's " +
 		"input at a display (by id or by package), or reads it back. 'shot' captures the " +
 		"display's own pixels to /data/local/tmp/<name>.png, free of the phone-screen " +
-		"composite - pull that file with adb. 'hide' drops the window while keeping the " +
-		"display and its apps running, 'show' brings it back, and 'destroy' releases the " +
+		"composite - pull that file with adb. 'tap' taps at display-pixel coordinates " +
+		"(x, y) on the target display, 'type' types text into the focused field " +
+		"(spaces included), and 'press' sends one keycode - all display-routed through " +
+		"the same Shizuku path as the pad, so they drive the app on the display, not the " +
+		"phone under it. 'hide' drops the window while keeping the display and its apps " +
+		"running, 'show' brings it back, and 'destroy' releases the " +
 		"display and whatever was running on it. Requires ztrackpad's accessibility " +
 		"service plus Shizuku, and an adb connection.",
 	parameters: Type.Object({
@@ -69,6 +73,9 @@ const vdisplayTool = defineTool({
 				Type.Literal("launch"),
 				Type.Literal("target"),
 				Type.Literal("shot"),
+				Type.Literal("tap"),
+				Type.Literal("type"),
+				Type.Literal("press"),
 			],
 			{ description: "Which action to perform." },
 		),
@@ -108,6 +115,30 @@ const vdisplayTool = defineTool({
 					"For op=shot only: the PNG file name (no extension) under /data/local/tmp. Defaults to vdisplay-<id>.",
 			}),
 		),
+		x: Type.Optional(
+			Type.Integer({
+				description:
+					"For op=tap only: X coordinate in display pixels on the target display.",
+			}),
+		),
+		y: Type.Optional(
+			Type.Integer({
+				description:
+					"For op=tap only: Y coordinate in display pixels on the target display.",
+			}),
+		),
+		text: Type.Optional(
+			Type.String({
+				description:
+					"For op=type only: the whole text to type into the focused field, spaces included.",
+			}),
+		),
+		key: Type.Optional(
+			Type.String({
+				description:
+					"For op=press only: one keycode - any KeyEvent name (ENTER, ESC, dpad_up, ...) or a raw integer.",
+			}),
+		),
 	}),
 
 	async execute(_toolCallId, params) {
@@ -119,6 +150,11 @@ const vdisplayTool = defineTool({
 		if (params.target) extra.push(params.target);
 		if (params.url) extra.push("--url", params.url);
 		if (params.shotName) extra.push("--name", params.shotName);
+		if (params.op === "tap" && params.x != null && params.y != null) {
+			extra.push(String(params.x), String(params.y));
+		}
+		if (params.op === "type" && params.text) extra.push(params.text);
+		if (params.op === "press" && params.key) extra.push(params.key);
 		const status = await vdisplay(params.op, extra);
 		return {
 			content: [{ type: "text", text: status }],
