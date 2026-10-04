@@ -36,16 +36,75 @@ get_status() { "$VD" status | head -1; }
 id_of() { echo "$1" | sed -n 's/.*id=\([0-9-]*\).*/\1/p'; }
 kind_of() { echo "$1" | sed -n 's/.*kind=\([a-z]*\).*/\1/p'; }
 
+# True when the display block "Display #<id> (activities...)" below contains the app's task
+# on a CURRENT display. Section-based, so a stale task on another display cannot fake it.
+placed_on() { # placed_on <display-id> <package>
+  "$ADB" shell dumpsys activity activities 2>/dev/null \
+    | awk -v id="$1" -v pkg="$2" \
+      'function sec() { return "Display #" id " " } \
+       $0 ~ ("Display #" id " ") { in_d=1; next } \
+       /Display #[0-9]+/ { in_d=0 } \
+       in_d && $0 ~ ("* Task{") && $0 ~ pkg { found=1 } \
+       END { exit !found }'
+}
+
+# True when the app is actually resumed on that display - placed but backgrounded is not
+# a display an agent can interact with yet.
+resumed_on() {
+  "$ADB" shell dumpsys activity activities 2>/dev/null \
+    | awk -v id="$1" -v pkg="$2" \
+      '$0 ~ ("Display #" id " ") { in_d=1; next } \
+       /Display #[0-9]+/ { in_d=0 } \
+       in_d && /Resumed/ && $0 ~ pkg { found=1 } \
+       END { exit !found }'
+}
+
+# launch_till_placed <display-id> <package> [extra...]: some apps (Chrome/Samsung) keep a
+# prewarmed or singleTask instance, and a display that is still settling swallows the first
+# start onto the default display. Each attempt force-stops first - a retry that re-delivers
+# into the existing (wrong-display) task can never recover - then starts and verifies the
+# task is really resumed on the display. A fresh display also spawns its own Launcher on
+# top, so the launched task must be focused (am task focus - the pad's own row-tap path)
+# before resume can be observed.
+launch_till_placed() {
+  local id="$1" pkg="$2"; shift 2
+  local tries=0 tid
+  while [ "$tries" -lt 5 ]; do
+    "$ADB" shell am force-stop "$pkg" >/dev/null 2>&1
+    sleep 2
+    "$VD" launch "$pkg" "$@" >/dev/null 2>&1
+    sleep 9
+    tid=$("$ADB" shell dumpsys activity activities 2>/dev/null \
+      | grep -E "^[[:space:]]*[+*] Task\{.*$pkg" | head -1 \
+      | sed -n 's/.*Task{[^#]*#\([0-9][0-9]*\).*/\1/p')
+    note "launch try $tries: task-id='$tid' placed=$(placed_on "$id" "$pkg" && echo Y || echo N) resumed=$(resumed_on "$id" "$pkg" && echo Y || echo N)"
+    if [ -n "$tid" ]; then
+      "$ADB" shell am task focus "$tid" >/dev/null 2>&1
+      sleep 3
+    fi
+    if placed_on "$id" "$pkg" && resumed_on "$id" "$pkg"; then return 0; fi
+    tries=$((tries+1))
+  done
+  return 1
+}
+
 # create is asynchronous: the broadcast answers before the display exists. Poll status
 # until the requested kind is alive (or the budget runs out) and echo the status line.
+# Floating displays must also show surface=alive - a created-but-not-drawn display cannot
+# host or capture yet.
 create_and_wait() {
   "$VD" create "$@" >/dev/null 2>&1
-  local tries=0 s
-  while [ "$tries" -lt 30 ]; do
+  local tries=0 s kind
+  while [ "$tries" -lt 40 ]; do
     s=$(get_status)
-    if [ "$(id_of "$s")" != "-1" ] && [ "$(kind_of "$s")" != "none" ]; then
-      echo "$s"
-      return 0
+    kind=$(kind_of "$s")
+    if [ "$(id_of "$s")" != "-1" ] && [ "$kind" != "none" ]; then
+      if [ "$kind" = "floating" ] && ! echo "$s" | grep -q "surface=alive"; then
+        :   # still drawing; keep polling
+      else
+        echo "$s"
+        return 0
+      fi
     fi
     sleep 1
     tries=$((tries+1))
@@ -63,7 +122,7 @@ assert_contains() { # assert_contains <label> <haystack> <needle>
 part="${1:-all}"
 
 run_headless() {
-  echo "== part A: headless"
+  echo "== part A: headless (hosts a process; UI placement is platform-refused)"
   local out id
   out=$(create_and_wait --headless --w 1812 --h 2176) || { ko "headless create"; return 1; }
   id=$(id_of "$out")
@@ -75,13 +134,23 @@ run_headless() {
   assert_contains "headless sized 1812x2176 at the platform" "$displayed" "1812 x 2176"
 
   "$ADB" shell am force-stop "$APP" >/dev/null 2>&1
-  sleep 1
-  out=$("$VD" launch "$APP") || { ko "headless launch op"; return 1; }
-  sleep 3
-  local placed
-  placed=$("$ADB" shell dumpsys activity activities 2>/dev/null \
-    | awk '/Task\{.*'"$APP"'/{f=1} f && /displayId=/{print; exit}')
-  assert_contains "app task placed on display $id" "$placed" "displayId=$id"
+  sleep 2
+  local lout
+  lout=$("$VD" launch "$APP")
+  sleep 5
+  if echo "$lout" | grep -q "^ok launch"; then
+    ok; note "PASS headless launch op accepted"
+  else
+    ko "headless launch op rejected: $lout"
+  fi
+  # The framework refuses to place UI activities on a headless presentation display
+  # (ActivityTaskSupervisor.isCallerAllowedToLaunchOnDisplay, AOSP 16): the process starts,
+  # the activity falls back to the default display. Placement is informational here; UI-app
+  # testing happens on floating displays (parts B/C).
+  local target
+  target=$("$ADB" shell dumpsys activity activities 2>/dev/null \
+    | grep -oE "displayId=[0-9]+" | head -1)
+  note "info: app task display after headless launch: $target"
 
   out=$("$VD" target "$id") || { ko "target op"; return 1; }
   assert_contains "target readback" "$("$VD" target)" "target $id"
@@ -116,12 +185,8 @@ run_floating() {
 
   "$ADB" shell am force-stop "$APP" >/dev/null 2>&1
   sleep 1
-  "$VD" launch "$APP" >/dev/null 2>&1
-  sleep 3
-  local placed
-  placed=$("$ADB" shell dumpsys activity activities 2>/dev/null \
-    | awk '/Task\{.*'"$APP"'/{f=1} f && /displayId=/{print; exit}')
-  assert_contains "app task placed on display $id" "$placed" "displayId=$id"
+  if ! launch_till_placed "$id" "$APP"; then ko "floating launch op placed nothing on $id"; else ok; note "PASS floating launch placed app on $id"; fi
+  sleep 1
 
   "$VD" target "$id" >/dev/null 2>&1
   assert_contains "floating target readback" "$("$VD" target)" "target $id"
@@ -137,38 +202,22 @@ run_floating() {
   fi
 
   # --- the interaction leg: tap into the composited window, type, prove it landed ---
-  echo "  interaction leg"
-  local frame focused before after
-  # The display composits into a ztrackpad window on the phone screen; find the largest.
-  frame=$("$ADB" shell dumpsys window windows 2>/dev/null \
-    | awk '/Window #.*app.so7o.ztrackpad/{w=$0} /frame=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]/{if (w ~ /ztrackpad/) {print $0}}' \
-    | sed -n 's/.*frame=\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\].*/\1 \2 \3 \4/p' \
-    | awk '{area=($3-$1)*($4-$2); if (area>max) {max=area; x=$1; y=$2; x2=$3; y2=$4}} END {if (max>0) print x, y, x2, y2}')
-  if [ -z "$frame" ]; then
-    ko "could not locate the composited vdisplay window on the phone screen"
-  else
-    read -r x y x2 y2 <<<"$frame"
-    local tapx tapy
-    tapx=$(( (x + x2) / 2 ))
-    tapy=$(( (y + y2) / 2 ))
-    note "composited window ${x},${y}-${x2},${y2}; tapping $tapx,$tapy"
-    # Tap near the top of the window (the app's list area) - a row tap should navigate.
-    "$ADB" shell input tap "$tapx" "$((y + 300))"
-    sleep 2
-    focused=$("$ADB" shell dumpsys window windows 2>/dev/null \
-      | grep -m1 "mCurrentFocus\|FocusedWindow" )
-    note "focused: $focused"
-    "$ADB" shell screencap -p /data/local/tmp/vdt_before.png >/dev/null 2>&1
-    "$ADB" shell input text "hello"
-    sleep 2
-    "$ADB" shell screencap -p /data/local/tmp/vdt_after.png >/dev/null 2>&1
-    "$ADB" pull /data/local/tmp/vdt_before.png "$TMPDIR/vdt_before.png" >/dev/null 2>&1
-    "$ADB" pull /data/local/tmp/vdt_after.png "$TMPDIR/vdt_after.png" >/dev/null 2>&1
-    if cmp -s "$TMPDIR/vdt_before.png" "$TMPDIR/vdt_after.png"; then
-      ko "screen unchanged after tap+type"
+  echo "  interaction leg (display-routed taps; proof = the display's own pixels)"
+  # Tap a row in the app's list, in DISPLAY coordinates - the op injects with the displayId
+  # attached (the pad's own path), so the event lands inside the app on the display. A row
+  # tap opens the detail activity; the display's own shot proves it changed.
+  "$VD" shot --name b_before >/dev/null 2>&1 && "$ADB" pull /data/local/tmp/b_before.png "$TMPDIR/b_before.png" >/dev/null 2>&1
+  note "tapping a list row at 500,300 (display px)"
+  "$VD" tap 500 300 >/dev/null 2>&1
+  sleep 3
+  if "$VD" shot --name b_after >/dev/null 2>&1 && "$ADB" pull /data/local/tmp/b_after.png "$TMPDIR/b_after.png" >/dev/null 2>&1; then
+    if cmp -s "$TMPDIR/b_before.png" "$TMPDIR/b_after.png"; then
+      ko "display unchanged after an in-display tap (event did not land inside)"
     else
-      ok; note "PASS screen changed after tap+type"
+      ok; note "PASS display changed after an in-display tap"
     fi
+  else
+    ko "could not capture the display for the tap proof"
   fi
 
   "$VD" target 0 >/dev/null 2>&1
@@ -176,8 +225,78 @@ run_floating() {
   echo "== part B done ($pass/$((pass+fail)) so far)"
 }
 
+run_browser() {
+  echo "== part C: browser search on a floating display"
+  local out id br
+  # Samsung Internet is this device's browser of choice; fall back to the system default.
+  if "$ADB" shell pm path com.sec.android.app.sbrowser >/dev/null 2>&1; then
+    br=com.sec.android.app.sbrowser
+  else
+    br=$("$ADB" shell cmd package resolve-activity --brief -a android.intent.action.VIEW -d 'https://example.com' 2>/dev/null \
+      | tail -1 | sed 's#/.*##')
+    [ -n "$br" ] || br=com.android.chrome
+  fi
+  note "browser: $br"
+  out=$(create_and_wait --w 1000 --h 1800) || { ko "browser create"; return 1; }
+  id=$(id_of "$out")
+  note "created display $id"
+
+  "$ADB" shell am force-stop "$br" >/dev/null 2>&1
+  sleep 2
+  if ! launch_till_placed "$id" "$br" --url "${VDISPLAY_TEST_URL:-https://jan-dev.so7o.dev/}"; then
+    ko "browser launch op placed nothing on $id"
+  else
+    ok; note "PASS $br task placed on display $id"
+  fi
+  sleep 4
+
+  "$VD" target "$id" >/dev/null 2>&1
+  # Everything below is display-routed (the tap/type/press ops carry displayId, the pad's
+  # own path), and every change is proven by the display's own pixels via `shot`.
+  "$VD" shot --name c1 >/dev/null 2>&1 && "$ADB" pull /data/local/tmp/c1.png "$TMPDIR/c1.png" >/dev/null 2>&1
+  note "focusing the browser field (press SEARCH) and typing the URL"
+  "$VD" press SEARCH >/dev/null 2>&1
+  sleep 2
+  "$VD" type "${VDISPLAY_TEST_QUERY:-jan-dev.so7o.dev}" >/dev/null 2>&1
+  "$VD" press ENTER >/dev/null 2>&1
+  sleep 7
+  if "$VD" shot --name c2 >/dev/null 2>&1 && "$ADB" pull /data/local/tmp/c2.png "$TMPDIR/c2.png" >/dev/null 2>&1; then
+    if cmp -s "$TMPDIR/c1.png" "$TMPDIR/c2.png"; then
+      ko "display unchanged after in-display type+enter"
+    else
+      ok; note "PASS display changed after in-display type+enter"
+    fi
+  else
+    ko "could not capture the display for the type proof"
+  fi
+
+  # A tap into the page: in-display click, again proven by the display's own shot.
+  note "tapping into the page at 500,900 (display px)"
+  "$VD" tap 500 900 >/dev/null 2>&1
+  sleep 4
+  if "$VD" shot --name c3 >/dev/null 2>&1 && "$ADB" pull /data/local/tmp/c3.png "$TMPDIR/c3.png" >/dev/null 2>&1; then
+    if cmp -s "$TMPDIR/c2.png" "$TMPDIR/c3.png"; then
+      ko "display unchanged after an in-display click"
+    else
+      ok; note "PASS display changed after an in-display click"
+    fi
+  else
+    ko "could not capture the display for the click proof"
+  fi
+
+  "$VD" target 0 >/dev/null 2>&1
+  "$VD" destroy >/dev/null 2>&1
+  echo "== part C done ($pass/$((pass+fail)) so far)"
+}
+
+shotpng() { # capture the phone screen to $TMPDIR/$(basename $1), echo rc
+  "$ADB" shell screencap -p "$1" >/dev/null 2>&1
+  "$ADB" pull "$1" "$TMPDIR/$(basename "$1")" >/dev/null 2>&1
+}
+
 if [ "$part" = "all" ] || [ "$part" = "headless" ]; then run_headless; fi
 if [ "$part" = "all" ] || [ "$part" = "floating" ]; then run_floating; fi
+if [ "$part" = "all" ] || [ "$part" = "browser" ]; then run_browser; fi
 
 echo
 if [ "$fail" = "0" ]; then

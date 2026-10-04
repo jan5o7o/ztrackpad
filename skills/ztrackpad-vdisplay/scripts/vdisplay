@@ -62,10 +62,16 @@ if [ "$op" = "keys" ] && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
     spec="$1"
     shift
 fi
-if { [ "$op" = "lock" ] || [ "$op" = "launch" ] || [ "$op" = "target" ]; } \
+if { [ "$op" = "lock" ] || [ "$op" = "launch" ] || [ "$op" = "target" ] \
+        || [ "$op" = "tap" ] || [ "$op" = "press" ] || [ "$op" = "taskfocus" ]; } \
         && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
     arg="$1"
     shift
+fi
+# `type` takes the whole remainder, spaces included.
+if [ "$op" = "type" ]; then
+    arg="$*"
+    shift $#
 fi
 
 headless=false
@@ -90,7 +96,7 @@ while [ $i -le "$n" ]; do
 done
 
 case "$op" in
-    status|create|show|hide|destroy|keys|keys-reset|lock|launch|target|shot) ;;
+    status|create|show|hide|destroy|keys|keys-reset|lock|launch|target|shot|tap|type|press|tasks|taskfocus) ;;
     *) echo "vdisplay: unknown op '$op'" >&2; usage 1 ;;
 esac
 
