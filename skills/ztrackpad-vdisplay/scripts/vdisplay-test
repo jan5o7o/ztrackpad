@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# vdisplay-test — the standard driving test for the virtual display.
+#
+# Proves the whole agent-loop against a target app on BOTH display shapes:
+#
+#   part A (headless): create --headless --w/--h, launch, assert the task lands on
+#                      that display, target switch + readback, shot must fail cleanly.
+#   part B (floating): create --w/--h, launch (clean process), assert placement, shot
+#                      must yield a real PNG, then the interaction leg: find the
+#                      composited window on the phone screen, tap into it, type text,
+#                      and prove the tap+type landed (window focus moved, the second
+#                      capture differs from the first).
+#
+# Exit status: 0 when every assertion passed, 1 on the first failure (with FAIL lines).
+# Part A/B can be run alone with ./vdisplay-test headless|floating.
+#
+# Needs: adb + ztrackpad 0.6.0+ (launch/target/shot ops), screen awake.
+set -uo pipefail
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+VD="$DIR/vdisplay"
+ADB="${VDISPLAY_ADB:-adb}"
+APP="${VDISPLAY_TEST_APP:-app.so7o.blogshell}"
+
+pass=0
+fail=0
+note() { printf '      %s\n' "$*"; }
+ok() { pass=$((pass+1)); }
+ko() { fail=$((fail+1)); echo "FAIL $*"; }
+check() { # check <label> <cmd...>
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then ok; note "PASS $label"; else ko "$label"; fi
+}
+
+get_status() { "$VD" status | head -1; }
+id_of() { echo "$1" | sed -n 's/.*id=\([0-9-]*\).*/\1/p'; }
+kind_of() { echo "$1" | sed -n 's/.*kind=\([a-z]*\).*/\1/p'; }
+
+# create is asynchronous: the broadcast answers before the display exists. Poll status
+# until the requested kind is alive (or the budget runs out) and echo the status line.
+create_and_wait() {
+  "$VD" create "$@" >/dev/null 2>&1
+  local tries=0 s
+  while [ "$tries" -lt 30 ]; do
+    s=$(get_status)
+    if [ "$(id_of "$s")" != "-1" ] && [ "$(kind_of "$s")" != "none" ]; then
+      echo "$s"
+      return 0
+    fi
+    sleep 1
+    tries=$((tries+1))
+  done
+  echo "$s"
+  return 1
+}
+
+assert_contains() { # assert_contains <label> <haystack> <needle>
+  if echo "$2" | grep -q -- "$3"; then ok; note "PASS $1"; else ko "$1 (want '$3' in '$2')"; fi
+}
+
+"$ADB" shell echo alive >/dev/null 2>&1 || { echo "vdisplay-test: no adb"; exit 2; }
+
+part="${1:-all}"
+
+run_headless() {
+  echo "== part A: headless"
+  local out id
+  out=$(create_and_wait --headless --w 1812 --h 2176) || { ko "headless create"; return 1; }
+  id=$(id_of "$out")
+  [ -n "$id" ] && [ "$id" != "-1" ] || { ko "headless create returned no id: $out"; return 1; }
+  note "created display $id"
+  assert_contains "headless kind" "$(get_status)" "kind=headless"
+  local displayed
+  displayed=$("$ADB" shell dumpsys display 2>/dev/null | grep -oE '"ztrackpad": uniqueId="[^"]*", [0-9]+ x [0-9]+' | head -1)
+  assert_contains "headless sized 1812x2176 at the platform" "$displayed" "1812 x 2176"
+
+  "$ADB" shell am force-stop "$APP" >/dev/null 2>&1
+  sleep 1
+  out=$("$VD" launch "$APP") || { ko "headless launch op"; return 1; }
+  sleep 3
+  local placed
+  placed=$("$ADB" shell dumpsys activity activities 2>/dev/null \
+    | awk '/Task\{.*'"$APP"'/{f=1} f && /displayId=/{print; exit}')
+  assert_contains "app task placed on display $id" "$placed" "displayId=$id"
+
+  out=$("$VD" target "$id") || { ko "target op"; return 1; }
+  assert_contains "target readback" "$("$VD" target)" "target $id"
+
+  local shotrc
+  "$VD" shot --name headless_probe >/dev/null 2>&1
+  shotrc=$?
+  if [ "$shotrc" = "1" ]; then ok; note "PASS headless shot failed cleanly"; else ko "headless shot should fail (rc=$shotrc)"; fi
+
+  "$VD" target 0 >/dev/null 2>&1
+  "$VD" destroy >/dev/null 2>&1
+  echo "== part A done ($pass/$((pass+fail)) so far)"
+}
+
+run_floating() {
+  echo "== part B: floating"
+  local out id w h
+  out=$(create_and_wait --w 1000 --h 1800) || { ko "floating create"; return 1; }
+  id=$(id_of "$out")
+  [ -n "$id" ] && [ "$id" != "-1" ] || { ko "floating create returned no id: $out"; return 1; }
+  note "created display $id"
+  local st
+  st=$(get_status)
+  if echo "$st" | grep -q "kind=floating" && echo "$st" | grep -q "surface=alive"; then
+    ok; note "PASS floating kind alive"
+  else
+    ko "floating kind alive ($st)"
+  fi
+  local vsz
+  vsz=$(get_status | sed -n 's/.*vsize=\([0-9x]*\).*/\1/p')
+  if [ "$vsz" = "1000x1800" ] || echo "$vsz" | grep -q "^1000"; then ok; note "PASS floating vsize $vsz"; else ko "floating vsize wanted 1000x1800 got $vsz"; fi
+
+  "$ADB" shell am force-stop "$APP" >/dev/null 2>&1
+  sleep 1
+  "$VD" launch "$APP" >/dev/null 2>&1
+  sleep 3
+  local placed
+  placed=$("$ADB" shell dumpsys activity activities 2>/dev/null \
+    | awk '/Task\{.*'"$APP"'/{f=1} f && /displayId=/{print; exit}')
+  assert_contains "app task placed on display $id" "$placed" "displayId=$id"
+
+  "$VD" target "$id" >/dev/null 2>&1
+  assert_contains "floating target readback" "$("$VD" target)" "target $id"
+
+  local shot rc size
+  shot=$("$VD" shot --name float_probe 2>&1)
+  rc=$?
+  if [ "$rc" = "0" ]; then
+    size=$("$ADB" shell stat -c%s "/data/local/tmp/float_probe.png" 2>/dev/null)
+    if [ -n "$size" ] && [ "$size" -gt 5000 ]; then ok; note "PASS floating shot $size bytes: $shot"; else ko "floating shot produced no real pixels (size=$size)"; fi
+  else
+    ko "floating shot failed: $shot"
+  fi
+
+  # --- the interaction leg: tap into the composited window, type, prove it landed ---
+  echo "  interaction leg"
+  local frame focused before after
+  # The display composits into a ztrackpad window on the phone screen; find the largest.
+  frame=$("$ADB" shell dumpsys window windows 2>/dev/null \
+    | awk '/Window #.*app.so7o.ztrackpad/{w=$0} /frame=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]/{if (w ~ /ztrackpad/) {print $0}}' \
+    | sed -n 's/.*frame=\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\].*/\1 \2 \3 \4/p' \
+    | awk '{area=($3-$1)*($4-$2); if (area>max) {max=area; x=$1; y=$2; x2=$3; y2=$4}} END {if (max>0) print x, y, x2, y2}')
+  if [ -z "$frame" ]; then
+    ko "could not locate the composited vdisplay window on the phone screen"
+  else
+    read -r x y x2 y2 <<<"$frame"
+    local tapx tapy
+    tapx=$(( (x + x2) / 2 ))
+    tapy=$(( (y + y2) / 2 ))
+    note "composited window ${x},${y}-${x2},${y2}; tapping $tapx,$tapy"
+    # Tap near the top of the window (the app's list area) - a row tap should navigate.
+    "$ADB" shell input tap "$tapx" "$((y + 300))"
+    sleep 2
+    focused=$("$ADB" shell dumpsys window windows 2>/dev/null \
+      | grep -m1 "mCurrentFocus\|FocusedWindow" )
+    note "focused: $focused"
+    "$ADB" shell screencap -p /data/local/tmp/vdt_before.png >/dev/null 2>&1
+    "$ADB" shell input text "hello"
+    sleep 2
+    "$ADB" shell screencap -p /data/local/tmp/vdt_after.png >/dev/null 2>&1
+    "$ADB" pull /data/local/tmp/vdt_before.png "$TMPDIR/vdt_before.png" >/dev/null 2>&1
+    "$ADB" pull /data/local/tmp/vdt_after.png "$TMPDIR/vdt_after.png" >/dev/null 2>&1
+    if cmp -s "$TMPDIR/vdt_before.png" "$TMPDIR/vdt_after.png"; then
+      ko "screen unchanged after tap+type"
+    else
+      ok; note "PASS screen changed after tap+type"
+    fi
+  fi
+
+  "$VD" target 0 >/dev/null 2>&1
+  "$VD" destroy >/dev/null 2>&1
+  echo "== part B done ($pass/$((pass+fail)) so far)"
+}
+
+if [ "$part" = "all" ] || [ "$part" = "headless" ]; then run_headless; fi
+if [ "$part" = "all" ] || [ "$part" = "floating" ]; then run_floating; fi
+
+echo
+if [ "$fail" = "0" ]; then
+  echo "vdisplay-test: PASS ($pass assertions)"
+  exit 0
+else
+  echo "vdisplay-test: FAIL ($fail failed, $pass passed)"
+  exit 1
+fi

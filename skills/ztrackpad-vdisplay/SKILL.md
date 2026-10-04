@@ -232,3 +232,22 @@ scripts/vdisplay launch com.android.settings
 scripts/vdisplay target "$(scripts/vdisplay status | sed -n 's/.* id=\([0-9-]*\).*/\1/p')"
 scripts/vdisplay shot --name app-state
 ```
+
+## Testing the display
+
+`scripts/vdisplay-test` is the standard driving test and part of the stack: it runs the
+whole agent loop — create (headless then floating), size, launch, placement, target switch
+and readback, shot (clean fail on headless, real pixels on floating), and a tap+type
+interaction probe — asserting each step (11 checks, PASS/FAIL summary, non-zero exit on
+failure). Run it after any change to the display or its ops:
+
+```bash
+scripts/vdisplay-test          # both shapes
+scripts/vdisplay-test headless # or just one
+```
+
+Verified matrix on the reference device (Z Fold 4 / Android 16): headless 1812x2176
+launches an app with its task on that display; `target` switches and reads back; `shot`
+fails cleanly on headless and yields a real PNG on floating; the tap+type probe changes
+the screen. The interaction proof is screen-change, not OCR — it proves delivery, not
+content.

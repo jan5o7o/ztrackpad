@@ -734,3 +734,9 @@ None of the Shizuku manager is bundled or redistributed here — this is a Shizu
 It declares `moe.shizuku.manager.permission.API_V23`, which is how a client asks to be
 allowed to use the API; it claims no permission of its own. Not affiliated with, or
 endorsed by, the Shizuku project.
+## Testing the virtual display
+
+`skills/ztrackpad-vdisplay/scripts/vdisplay-test` drives the full agent loop over both
+display shapes (headless + floating): create with explicit size, launch, placement,
+pad-target switch, capture, and a tap+type probe — 11 assertions, one command. See
+`skills/ztrackpad-vdisplay/SKILL.md`.
