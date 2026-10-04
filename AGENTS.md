@@ -450,8 +450,8 @@ this list honest — do not move rows up without actually re-testing.
   move=<px>` on finger-up (values like -236/-416/412 measured), i.e. the edge strip banks
   the whole gesture and spends it as one event on release; with it off the strip scrolls
   live as before. The *feel* of the gain and the one-event-at-once delivery is a finger
-  judgment - EDGE_FLICK_GAIN started at Lite's 2.0, then landed at 1.0 (1:1) when 2.0's
-  jump felt too big.
+  judgment - EDGE_FLICK_GAIN started at Lite's 2.0, then 2.0's jump felt too big, 1.0
+  (1:1) still felt like too much travel, and it now sits at 0.8.
 - **Auto-rebind after the shell service dies**: killing the shell process logs
   `shell service disconnected` → `rebinding shell service (attempt 1)` →
   `shell service bound` about 1.8s later, with no accessibility-service restart. The
