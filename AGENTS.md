@@ -449,9 +449,12 @@ this list honest — do not move rows up without actually re-testing.
   so the two cannot disagree. With the toggle on, the log shows `flick scroll on release
   move=<px>` on finger-up (values like -236/-416/412 measured), i.e. the edge strip banks
   the whole gesture and spends it as one event on release; with it off the strip scrolls
-  live as before. The *feel* of the gain and the one-event-at-once delivery is a finger
-  judgment - EDGE_FLICK_GAIN started at Lite's 2.0, then 2.0's jump felt too big, 1.0
-  (1:1) and 0.8 were each still too fast, and it now sits at 0.4.
+  live as before. The *feel* of the gain and the delivery is a finger judgment - the
+  tuning log: as wheel events the gain went 2.0 -> 1.0 -> 0.8 -> 0.4 and it STILL felt
+  fast, which pinned it on the delivery (an event teleports the page, and targets scale
+  wheel deltas per-app). On the surface display the flick is now Lite's own mechanism -
+  one 260ms stroke of the banked distance, gain back at Lite's 2.0 - and the wheel
+  glide (FLICK_STEP 20/40ms) survives only for retargeted displays a stroke cannot reach.
 - **Auto-rebind after the shell service dies**: killing the shell process logs
   `shell service disconnected` → `rebinding shell service (attempt 1)` →
   `shell service bound` about 1.8s later, with no accessibility-service restart. The

@@ -124,14 +124,23 @@ public class TrackpadService extends AccessibilityService {
      * CAN scroll live, which is the better feel, but Lite's was deliberately different:
      * slow to react, then a single flick.
      *
-     * This is the flick's gain: banked distance per px of finger travel, spent at once.
-     * Lite's ratio was 2.0 - there it measured 2:1 and felt right - but a wheel unit on
-     * this build moves about as far as a stroke pixel did there, so the ratio had to come
-     * down a lot. The tuning log: 2.0 too big a jump, 1.0 still too far, 0.8 still too
-     * fast. 0.4 is the current setting: a swipe moves the page about two-fifths as far
-     * as the finger, in one go.
+     * This is the flick's gain: banked px of stroke per px of finger travel, spent on
+     * release. It is Lite's number (2.0) and the tuning story lives in the delivery:
+     * when the flick came out as wheel events - 2.0, then 1.0, then 0.8, 0.4, each
+     * "still fast" - the culprit was the single-event teleport and per-app wheel
+     * scaling, not the distance. The on-surface flick is now Lite's own mechanism, a
+     * fixed-duration stroke, so the old reductions are withdrawn and 2.0 is back: a
+     * 200px strip swipe moves the page about as far as a 400px swipe applied directly.
      */
-    private static final float EDGE_FLICK_GAIN = 0.4f;
+    private static final float EDGE_FLICK_GAIN = 2.0f;
+    /**
+     * Fallback only: when the pointer is aimed at another display (which a stroke
+     * cannot reach), the banked flick is delivered as a short glide of these wheel
+     * units per step, this far apart. Small, frequent deltas stay closer to
+     * proportional on targets that scale wheel input aggressively.
+     */
+    private static final float FLICK_STEP = 20f;
+    private static final long FLICK_STEP_MS = 40L;
     /** Ceiling on one flick, as a fraction of the screen height - a long fling stays a fling. */
     private static final float SCROLL_CAP_SCREEN = 0.6f;
     /**
@@ -399,6 +408,8 @@ public class TrackpadService extends AccessibilityService {
     private long lastScrollAt;
     /** Scroll banked while a finger is down, spent on release - see flushPendingScroll. */
     private float pendingScrollY;
+    /** The in-flight glide that spends a released flick, or null. Cut short by a new DOWN. */
+    private Runnable flickSteps;
     private GestureDescription.StrokeDescription stroke;
 
     // =========================================================================
@@ -3758,20 +3769,22 @@ public class TrackpadService extends AccessibilityService {
      * Spend the scroll a flick-mode gesture banked, once the finger is up.
      *
      * This is ZTrackpad Lite's whole mechanism, ported as an option: bank the distance
-     * during the gesture and inject it as ONE event on release. Lite had no choice - its
+     * during the gesture and spend it after the finger is up. Lite had no choice - its
      * only backend is dispatchGesture, which cannot inject while a real touch is in
      * progress - but its feel was distinctive and worth offering here: the strip is slow
      * to react (nothing happens until you lift your finger) and then the page moves in a
-     * single jump, like a flick.
+     * single motion, like a flick.
      *
-     * With Shizuku the distance goes out as one wheel event at the pointer. Without it,
-     * it is one stroke, exactly as in Lite.
+     * Lite's single motion is a 260ms stroke, i.e. a visible glide, and that is exactly
+     * what the on-surface flick sends - the whole point of the mode. When the pointer is
+     * aimed at another display a stroke cannot reach it (sendStroke refuses), so there
+     * the distance goes out as a wheel glide instead; see spendFlick.
      */
     private void flushPendingScroll() {
         float move = pendingScrollY;
         pendingScrollY = 0f;
         if (move == 0f) return;
-        // One event has to carry the whole gesture, so cap it: a long drag is a fling, and
+        // One gesture has to carry the whole swipe, so cap it: a long drag is a fling, and
         // a fling over a full screen carries on scrolling after the finger is long gone.
         float cap = screenH * SCROLL_CAP_SCREEN;
         if (move > cap) move = cap;
@@ -3780,16 +3793,46 @@ public class TrackpadService extends AccessibilityService {
         // floor for the whole gesture rather than something a fast swipe trips over.
         if (Math.abs(move) < dp(MIN_SCROLL_DP)) return;
         Log.i(TAG, "flick scroll on release move=" + (int) move);
-        if (useShizuku()) {
-            // Same sign as the live path: the banked move has the finger's sign, and the
-            // wheel event negates it so content follows the touch.
-            shizuku.scroll(cursorX, cursorY, -move, 0f);
+        if (targetDisplayId == surfaceDisplayId) {
+            // The finger is up by now, so dispatchGesture cannot be cancelled by it - this
+            // is Lite's own mechanism, and the whole point of the mode: one fixed
+            // SCROLL_MS glide of the entire banked distance, in pixels, so the page moves
+            // exactly as far as the stroke says instead of whatever a wheel event scales to.
+            Path p = new Path();
+            p.moveTo(cursorX, cursorY);
+            p.lineTo(cursorX, clamp(cursorY + move, 0, screenH - 1));
+            sendStroke(new GestureDescription.StrokeDescription(p, 0, SCROLL_MS));
             return;
         }
-        Path p = new Path();
-        p.moveTo(cursorX, cursorY);
-        p.lineTo(cursorX, clamp(cursorY + move, 0, screenH - 1));
-        sendStroke(new GestureDescription.StrokeDescription(p, 0, SCROLL_MS));
+        // The pointer is on another display, which dispatchGesture cannot reach; the wheel
+        // events go to wherever the pointer is aimed. Not Lite's feel, but the corner case.
+        spendFlick(move);
+    }
+
+    /**
+     * Fallback delivery for a banked flick aimed at a non-surface display: a glide of
+     * small wheel events.
+     *
+     * A single event at the whole distance would land instantly and some targets scale a
+     * wheel event into far more content than its unit count says; splitting into
+     * FLICK_STEP-sized deltas every FLICK_STEP_MS makes the page move over a few hundred
+     * ms with each hop small enough to read as a scroll rather than a jump. A new
+     * gesture (ACTION_DOWN) removes the runnable, so a quick re-flick cuts the old glide
+     * short instead of stacking.
+     */
+    private void spendFlick(float move) {
+        final float dir = (move < 0f) ? -1f : 1f;
+        final float[] left = { Math.abs(move) };
+        flickSteps = new Runnable() {
+            @Override public void run() {
+                if (left[0] <= 0f) { flickSteps = null; return; }
+                float step = Math.min(FLICK_STEP, left[0]);
+                left[0] -= step;
+                shizuku.scroll(cursorX, cursorY, -dir * step, 0f);
+                ui.postDelayed(this, FLICK_STEP_MS);
+            }
+        };
+        ui.post(flickSteps);
     }
 
     // ------------------------------------------------------------------
@@ -3985,6 +4028,8 @@ public class TrackpadService extends AccessibilityService {
                     scrollMode = false;
                     scrollAccum = 0f;
                     pendingScrollY = 0f;
+                    // a new gesture cuts short whatever glide is still arriving
+                    if (flickSteps != null) { ui.removeCallbacks(flickSteps); flickSteps = null; }
                     twoMoved = false;
                     rightClickFired = false;
                     cancelHold();
