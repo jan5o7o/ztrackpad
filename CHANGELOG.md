@@ -9,6 +9,13 @@ it can only ever describe the app as shipped.
 
 ## Unreleased
 
+### Bugfixes
+
+- `scripts/vdisplay tap` now consumes **both** coordinates (`tap <x> <y>`) instead of
+  dropping the second one and sending x alone. This matches the contract 0.6.0
+  documented and what `scripts/vdisplay-test` actually calls (`tap 500 300`), so the
+  driving test's taps now land where they say. `type` and `press` were already correct.
+
 ## 0.6.0 — 2026-10-04
 
 ### Virtual display testing ops

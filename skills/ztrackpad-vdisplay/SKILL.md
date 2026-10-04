@@ -221,6 +221,24 @@ there; on a floating display it is drawn over that window; on an external displa
 (XREAL/DeX) it is a second overlay window opened *on* that display, because a window
 we own cannot be composited into another display's output.
 
+### Driving it from the script
+
+The input ops route through the same Shizuku path as the pad's own clicks and keys,
+so every event carries the *target* display's id — they drive the app **on the
+display**, not the phone under it:
+
+```bash
+scripts/vdisplay tap 500 300      # tap at these px on the target display
+scripts/vdisplay type hello       # type into the focused field, spaces included
+scripts/vdisplay press ENTER      # one keycode (any KeyEvent name or integer)
+```
+
+- Coordinates are **display pixels** of the current target display, not phone-screen
+  pixels. When the two differ, aim with `shot` pulled through OCR or an image editor.
+- `shot` after a `tap`/`type` is the standard proof: the display changed or it did not.
+- `type` takes the whole remainder of the command line, so text with spaces needs no
+  quoting; `press` takes exactly one keycode token.
+
 ## Automating a whole test pass
 
 The pieces chain: create a display, launch the app under test on it, set the target so
