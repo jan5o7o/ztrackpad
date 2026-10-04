@@ -36,6 +36,8 @@ scripts/vdisplay target 0                  # pad input -> the phone display
 scripts/vdisplay target                    # read the current target back
 scripts/vdisplay shot                      # -> /data/local/tmp/vdisplay-<id>.png
 scripts/vdisplay shot --name verify        # -> /data/local/tmp/verify.png
+scripts/vdisplay lock on                   # freeze the pad's position and size
+scripts/vdisplay flick on                  # edge strips bank the gesture, scroll on release
 ```
 
 Equivalent one-liners, if the script is unavailable:
@@ -66,7 +68,7 @@ so `status` reports the size that actually came up.
 `status` prints one line of `key=value` pairs:
 
 ```
-shizuku=ready id=25 kind=floating window=shown surface=alive vsize=1245x1397 target=0 padlocked=false keys=default
+shizuku=ready id=25 kind=floating window=shown surface=alive vsize=1245x1397 target=0 padlocked=false flick=off keys=default
 ```
 
 | key | meaning |
@@ -79,6 +81,7 @@ shizuku=ready id=25 kind=floating window=shown surface=alive vsize=1245x1397 tar
 | `vsize` | the display's size in px |
 | `target` | which display the trackpad is currently driving |
 | `padlocked` | whether the trackpad refuses to move or resize |
+| `flick` | `on` or `off` — whether the edge strips bank the gesture and scroll once on release |
 | `keys` | `default` or `custom` — whether the keys panel is the built-in layout |
 
 ## Things worth knowing

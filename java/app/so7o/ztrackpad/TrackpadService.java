@@ -116,6 +116,28 @@ public class TrackpadService extends AccessibilityService {
      * minimum, where a percentage would leave a sliver too narrow to hit.
      */
     private static final int EDGE_SCROLL_DP = 28;
+    /**
+     * Flick-to-scroll mode (CONTROLS > Flick to scroll): the edge strips stop scrolling
+     * live and instead bank the whole gesture's travel, spending it as ONE jump on
+     * release - ported from ZTrackpad Lite, where it is the only option because
+     * dispatchGesture cannot inject mid-gesture. It is an option here because this build
+     * CAN scroll live, which is the better feel, but Lite's was deliberately different:
+     * slow to react, then a single flick.
+     *
+     * This is the flick's gain: banked distance per px of finger travel, spent at once.
+     * It is a plain ratio in the same way Lite's was (2.0 there measured 2:1 and felt
+     * right, so it is 2.0 here too).
+     */
+    private static final float EDGE_FLICK_GAIN = 2.0f;
+    /** Ceiling on one flick, as a fraction of the screen height - a long fling stays a fling. */
+    private static final float SCROLL_CAP_SCREEN = 0.6f;
+    /**
+     * Floor on one flick, in dp: below this much banked distance nothing is injected.
+     * A sub-floor flick is a tap's worth of travel, which a stroke would read as a tap.
+     */
+    private static final float MIN_SCROLL_DP = 20f;
+    /** How long the single stroke that carries a flick takes, on the no-Shizuku path. */
+    private static final long SCROLL_MS = 260L;
     private static final long CLICK_MS = 45L;
     /**
      * How long to wait before injecting through the panels, and how long the panels then
@@ -183,6 +205,9 @@ public class TrackpadService extends AccessibilityService {
      */
     private static final String PREF_SHOW_KEYS_BUBBLE = "showKeysBubble";
     private static final String PREF_SHOW_TASKS_BUBBLE = "showTasksBubble";
+
+    /** Pref: edge-strip scrolls bank the gesture and spend it on release - see flickScroll. */
+    private static final String PREF_FLICK_SCROLL = "flickScroll";
 
     /** Opacity slider range, in percent. */
     private static final int OPACITY_MIN = 20;
@@ -300,6 +325,11 @@ public class TrackpadService extends AccessibilityService {
     /** "full" or "favorites"; see PREF_KEYS_MODE. */
     private String keysMode = "full";
     private boolean showKeysBubble = true, showTasksBubble = true;
+    /**
+     * True = the edge strips scroll Lite-style: bank the gesture, spend it on release
+     * ("flick to scroll"). False = the default live throttled scroll. See PREF_FLICK_SCROLL.
+     */
+    private boolean flickScroll = false;
     /** The list as last rendered, so a tap can act on rows it did not have to re-read. */
     private List<TaskRow> lastRows;
     /**
@@ -364,6 +394,8 @@ public class TrackpadService extends AccessibilityService {
     private boolean moved;
     private float scrollAccum;
     private long lastScrollAt;
+    /** Scroll banked while a finger is down, spent on release - see flushPendingScroll. */
+    private float pendingScrollY;
     private GestureDescription.StrokeDescription stroke;
 
     // =========================================================================
@@ -386,6 +418,7 @@ public class TrackpadService extends AccessibilityService {
         keysMode = prefs.getString(PREF_KEYS_MODE, "full");
         showKeysBubble = prefs.getBoolean(PREF_SHOW_KEYS_BUBBLE, true);
         showTasksBubble = prefs.getBoolean(PREF_SHOW_TASKS_BUBBLE, true);
+        flickScroll = prefs.getBoolean(PREF_FLICK_SCROLL, false);
         padLocked = prefs.getBoolean(PREF_LOCK, false);
 
         cursorX = outW / 2f;
@@ -1610,7 +1643,20 @@ public class TrackpadService extends AccessibilityService {
             else if ("toggle".equals(what)) setControlsVisible(!controlsVisible);
             else return "error: controls wants show|hide|toggle";
             return "ok controls " + (controlsVisible ? "shown" : "hidden") + " keys-mode=" + keysMode
-                    + " bubbles=keys:" + onOff(showKeysBubble) + ",tasks:" + onOff(showTasksBubble);
+                    + " bubbles=keys:" + onOff(showKeysBubble) + ",tasks:" + onOff(showTasksBubble)
+                    + " flick=" + onOff(flickScroll);
+        }
+
+        // The edge strips' scroll feel, mirroring the CONTROLS row - same setter, so a
+        // script and a finger cannot disagree, and a no-arg read for scripts.
+        if ("flick".equals(op)) {
+            String what = (arg == null) ? "" : arg.trim();
+            if (what.length() == 0) return "ok flick " + onOff(flickScroll);
+            if (!"on".equals(what) && !"off".equals(what)) {
+                return "error: flick wants on|off, not '" + what + "'";
+            }
+            setFlickScroll("on".equals(what));
+            return "ok flick " + onOff(flickScroll);
         }
 
         // Which layout the keys panel shows, and which of the optional dots exist. Both
@@ -1820,7 +1866,7 @@ public class TrackpadService extends AccessibilityService {
         }
 
         return "error: unknown op '" + op + "' (status|create|destroy|show|hide|lock|keys"
-                + "|keys-reset|keys-mode|bubbles|controls|tasks|taskfocus|launch|target|shot)";
+                + "|keys-reset|keys-mode|flick|bubbles|controls|tasks|taskfocus|launch|target|shot)";
     }
 
     /**
@@ -1966,6 +2012,7 @@ public class TrackpadService extends AccessibilityService {
                 + " vsize=" + screenSurfaceW + "x" + screenSurfaceH
                 + " target=" + targetDisplayId
                 + " padlocked=" + padLocked
+                + " flick=" + onOff(flickScroll)
                 + " keys=" + ((keysSpec == null || keysSpec.length() == 0) ? "default" : "custom");
     }
 
@@ -3665,6 +3712,13 @@ public class TrackpadService extends AccessibilityService {
 
     /** The edge strips: half the gain, half the travel per flush, and capped flushes. */
     private void scrollByEdge(float dy) {
+        if (flickScroll) {
+            // Flick mode banks the whole gesture and spends it on release - nothing is
+            // injected here, on purpose: a live flush now would double the travel with
+            // the release jump. See flushPendingScroll().
+            pendingScrollY += dy * EDGE_FLICK_GAIN;
+            return;
+        }
         scrollBy(dy, SCROLL_GAIN * EDGE_SCROLL_FACTOR, EDGE_FLUSH_PX, true);
     }
 
@@ -3695,6 +3749,44 @@ public class TrackpadService extends AccessibilityService {
         sendStroke(new GestureDescription.StrokeDescription(p, 0, 60));
         scrollAccum -= take;
         lastScrollAt = now;
+    }
+
+    /**
+     * Spend the scroll a flick-mode gesture banked, once the finger is up.
+     *
+     * This is ZTrackpad Lite's whole mechanism, ported as an option: bank the distance
+     * during the gesture and inject it as ONE event on release. Lite had no choice - its
+     * only backend is dispatchGesture, which cannot inject while a real touch is in
+     * progress - but its feel was distinctive and worth offering here: the strip is slow
+     * to react (nothing happens until you lift your finger) and then the page moves in a
+     * single jump, like a flick.
+     *
+     * With Shizuku the distance goes out as one wheel event at the pointer. Without it,
+     * it is one stroke, exactly as in Lite.
+     */
+    private void flushPendingScroll() {
+        float move = pendingScrollY;
+        pendingScrollY = 0f;
+        if (move == 0f) return;
+        // One event has to carry the whole gesture, so cap it: a long drag is a fling, and
+        // a fling over a full screen carries on scrolling after the finger is long gone.
+        float cap = screenH * SCROLL_CAP_SCREEN;
+        if (move > cap) move = cap;
+        if (move < -cap) move = -cap;
+        // The banked distance is already proportional to the finger, so this is only a
+        // floor for the whole gesture rather than something a fast swipe trips over.
+        if (Math.abs(move) < dp(MIN_SCROLL_DP)) return;
+        Log.i(TAG, "flick scroll on release move=" + (int) move);
+        if (useShizuku()) {
+            // Same sign as the live path: the banked move has the finger's sign, and the
+            // wheel event negates it so content follows the touch.
+            shizuku.scroll(cursorX, cursorY, -move, 0f);
+            return;
+        }
+        Path p = new Path();
+        p.moveTo(cursorX, cursorY);
+        p.lineTo(cursorX, clamp(cursorY + move, 0, screenH - 1));
+        sendStroke(new GestureDescription.StrokeDescription(p, 0, SCROLL_MS));
     }
 
     // ------------------------------------------------------------------
@@ -3826,7 +3918,7 @@ public class TrackpadService extends AccessibilityService {
             // This is the only writer of the handle's label: a transient gesture wins, then
             // the lock, then the armed/move states. The lock used to set the text itself,
             // and the next drag promptly overwrote it back to MOVE.
-            String mode = edgeScroll ? "\u2261  SCROLL"
+            String mode = edgeScroll ? (flickScroll ? "\u2261  FLICK" : "\u2261  SCROLL")
                     : (dragging ? "\u2261  DRAGGING"
                             : (padLocked ? "\u2261  LOCKED"
                                     : (dragArmed ? "\u2261  DRAG ARMED" : "\u2261  MOVE")));
@@ -3889,6 +3981,7 @@ public class TrackpadService extends AccessibilityService {
                     moved = false;
                     scrollMode = false;
                     scrollAccum = 0f;
+                    pendingScrollY = 0f;
                     twoMoved = false;
                     rightClickFired = false;
                     cancelHold();
@@ -3994,6 +4087,8 @@ public class TrackpadService extends AccessibilityService {
                         tapDrag = false;
                         // an edge tap must not arm the tap-then-drag window
                         lastTapUpAt = 0L;
+                        // flick mode spent nothing while the finger was down; spend it now
+                        flushPendingScroll();
                         updateModeUi();
                         return true;
                     }
@@ -4024,6 +4119,8 @@ public class TrackpadService extends AccessibilityService {
                     cancelHold();
                     tapDrag = false;
                     edgeScroll = false;
+                    // like Lite: a gesture cancelled mid-way still spends what it banked
+                    flushPendingScroll();
                     if (dragging) { endDrag(); dragging = false; updateModeUi(); }
                     scrollMode = false;
                     return true;
@@ -4737,6 +4834,11 @@ public class TrackpadService extends AccessibilityService {
                     @Override public void onClick(View v) { tick(); setBubbleShown(false, !showTasksBubble); }
                 }));
 
+        controlsRows.addView(sectionLabel("SCROLLING"));
+        controlsRows.addView(controlRow("Flick to scroll", flickScroll, new View.OnClickListener() {
+            @Override public void onClick(View v) { tick(); setFlickScroll(!flickScroll); }
+        }));
+
         // no section label here: the arrow rows read as links, and it is the difference
         // between the panel fitting its content and clipping the last row
         controlsRows.addView(linkRow("How to customize the keys", getString(R.string.help_guide_url)));
@@ -4821,6 +4923,18 @@ public class TrackpadService extends AccessibilityService {
         }
         applyTheme();
         Log.i(TAG, "bubbles -> keys=" + showKeysBubble + " windows=" + showTasksBubble);
+    }
+
+    /**
+     * The edge strips' scroll behaviour: live as the finger drags (default), or banked
+     * and spent as a single flick on release (Lite's feel). One setter, shared by the
+     * CONTROLS row and the `flick` op, so a finger and a script cannot disagree.
+     */
+    private void setFlickScroll(boolean on) {
+        flickScroll = on;
+        prefs.edit().putBoolean(PREF_FLICK_SCROLL, on).apply();
+        refreshControlsRows();
+        Log.i(TAG, "flick to scroll -> " + (on ? "on" : "off"));
     }
 
     /**

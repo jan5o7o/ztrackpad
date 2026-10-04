@@ -9,6 +9,13 @@ it can only ever describe the app as shipped.
 
 ## Unreleased
 
+### Features
+
+- **Flick to scroll** (CONTROLS > SCROLLING): the pad's edge strips normally scroll
+  live while your finger moves. Flip this on and they bank the whole gesture and
+  spend it as one jump on release, the feel of So7o Z Trackpad Lite, ported as an
+  option. Also scriptable: `vdisplay flick on|off`, and `status` reports `flick=`.
+
 ### Bugfixes
 
 - `scripts/vdisplay tap` now consumes **both** coordinates (`tap <x> <y>`) instead of

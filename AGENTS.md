@@ -117,7 +117,10 @@ Ops: `status`, `create` (+`--ez headless true`, + `--ei w W --ei h H` for a requ
 size), `show`, `hide`, `destroy`, `keys`
 (`--es spec '<layout>'`, no spec = read it back), `keys-reset`, and `lock`
 (`--es arg on|off|toggle`) - the lock is the one non-display op, and it drives the same
-`setPadLocked` the pad's lock dot does, so the two cannot disagree. `tasks` (no arg) lists
+`setPadLocked` the pad's lock dot does, so the two cannot disagree. `flick`
+(`--es arg on|off`, no arg = read it back) is the second non-display op: it switches the
+edge strips between live scrolling and Lite's bank-and-scroll-on-release feel, through the
+same `setFlickScroll` the CONTROLS row uses. `tasks` (no arg) lists
 the floating ("pop-up view") windows on the display the panels live on, and with
 `--es arg show|hide|toggle` drives the panel that lists them; `taskfocus --es arg <TASK_ID>`
 brings one to the front. `tasks` replies `ok tasks n=<count> display=<d>` followed by
@@ -154,7 +157,7 @@ pixels to composite, so it fails cleanly.
   manifest-declared receiver on API 26+, and the failure is silent (result=0 with no
   `data=`), which is easy to misread as success.
 - `status` replies with `shizuku=ready id=N kind=floating|headless|none window=shown|hidden
-  surface=alive|detached vsize=WxH target=N padlocked=true|false keys=default|custom`;
+  surface=alive|detached vsize=WxH target=N padlocked=true|false flick=on|off keys=default|custom`;
   scripts parse that line.
 - `create` is asynchronous — the floating display is built from the SurfaceView's
   surface callback, so poll `status` until `kind=floating`.
@@ -441,6 +444,13 @@ this list honest — do not move rows up without actually re-testing.
   a `'` label and the `|` `;` `:` separators - `status` flips to `keys=custom`, a custom
   3-row layout renders centred, and `keys-reset` restores `rows=8 keys=75`. The built-in
   spec reproduces the old hand-built layout exactly: 13 keys in row 1, 11 in row 2.
+- **Flick-to-scroll toggle**: `vdisplay flick on|off` round-trips exactly with `status`
+  (`flick=on|off`), rejects anything else, and the CONTROLS row uses the same `setFlickScroll`,
+  so the two cannot disagree. With the toggle on, the log shows `flick scroll on release
+  move=<px>` on finger-up (values like -236/-416/412 measured), i.e. the edge strip banks
+  the whole gesture and spends it as one event on release; with it off the strip scrolls
+  live as before. The *feel* of EDGE_FLICK_GAIN 2.0 and the one-event-at-once delivery is
+  untested by hand - that row needs a finger.
 - **Auto-rebind after the shell service dies**: killing the shell process logs
   `shell service disconnected` → `rebinding shell service (attempt 1)` →
   `shell service bound` about 1.8s later, with no accessibility-service restart. The

@@ -17,6 +17,7 @@
 #   vdisplay keys '<spec>'        # set a custom key layout
 #   vdisplay keys-reset           # back to the built-in layout
 #   vdisplay lock on|off|toggle   # freeze the pad against moving and resizing
+#   vdisplay flick on|off         # edge strips bank the gesture, scroll on release
 #
 # ztrackpad must be running with its accessibility service enabled and Shizuku
 # granted: it owns the overlay windows and the Shizuku binding, so this only pokes it
@@ -56,8 +57,8 @@ esac
 op=${1:-status}
 shift || true
 
-# `keys` takes an optional positional spec; `lock`, `launch` and `target` an optional
-# positional value. Pick these up BEFORE the option loop, or a value full of ':' and ';'
+# `keys` takes an optional positional spec; `lock`, `flick`, `launch` and `target` an
+# optional positional value. Pick these up BEFORE the option loop, or a value full of ':' and ';'
 # reads as an unknown flag.
 spec=""
 arg=""
@@ -66,6 +67,7 @@ if [ "$op" = "keys" ] && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
     shift
 fi
 if { [ "$op" = "lock" ] || [ "$op" = "launch" ] || [ "$op" = "target" ] \
+        || [ "$op" = "flick" ] \
         || [ "$op" = "press" ] || [ "$op" = "taskfocus" ]; } \
         && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
     arg="$1"
@@ -104,7 +106,7 @@ while [ $i -le "$n" ]; do
 done
 
 case "$op" in
-    status|create|show|hide|destroy|keys|keys-reset|lock|launch|target|shot|tap|type|press|tasks|taskfocus) ;;
+    status|create|show|hide|destroy|keys|keys-reset|lock|flick|launch|target|shot|tap|type|press|tasks|taskfocus) ;;
     *) echo "vdisplay: unknown op '$op'" >&2; usage 1 ;;
 esac
 

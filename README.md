@@ -47,11 +47,12 @@ Three floating dots, and five controls docked inside the pad:
   the pad around.
 - **CONTROLS** (the gear) holds what is a setting rather than a control: whether the keys panel
   shows the **full keyboard** or your own **favorite shortcuts**, whether each optional dot
-  exists at all, and two links — the keys guide below, and the issue tracker. The pad's own dot
+  exists at all, whether the edge strips **scroll live or flick on release** (below), and two
+  links — the keys guide below, and the issue tracker. The pad's own dot
   has no switch, deliberately: it is the only way to show the pad and it carries the gear, so
   hiding it would strand the way back.
 
-![The THEME and CONTROLS panels open side by side over the home screen: five presets with High contrast selected and the opacity slider at 48%, beside the keys-panel choice, the two dot switches, and links to the keys guide and the issue tracker](docs/screenshots/theme-and-controls.jpg)
+![The THEME and CONTROLS panels open side by side over the home screen: five presets with High contrast selected and the opacity slider at 48%, beside the keys-panel choice, the two dot switches, the flick-to-scroll switch, and links to the keys guide and the issue tracker](docs/screenshots/theme-and-controls.jpg)
 
 ## Floating windows
 
@@ -364,7 +365,10 @@ creates itself** — floating in the top half of the phone, or headless off-scre
 ### Edge scrolling, and a lock
 
 The pad's own left and right edges scroll like a laptop's strip; and the lock dot freezes the
-pad's geometry while leaving input alone. *No clip yet* — see
+pad's geometry while leaving input alone. **Flick to scroll** (CONTROLS) changes what the
+strips do: instead of scrolling live while your finger moves, they bank the whole gesture and
+spend it as one jump when you lift — the feel of So7o Z Trackpad Lite, offered here as the
+option. *No clip yet* — see
 [Split screen](#split-screen) and [Trackpad layout](#trackpad-layout).
 
 ### Click-through, so the pad is not an obstruction
@@ -396,7 +400,9 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
   `vdisplay keys '<spec>'`. Format and examples in `skills/ztrackpad-vdisplay/SKILL.md`, and the
   gear dot switches the panel between the built-in keyboard and your own spec.
 - **A CONTROLS panel in the pad** (the gear dot, outermost on the right): the keys choice above,
-  on/off switches for the `⌨` and `▤` dots, and links to the keys guide and the issue tracker.
+  on/off switches for the `⌨` and `▤` dots, a **Flick to scroll** switch that trades the
+  strips' live scroll for Lite's bank-on-release feel, and links to the keys guide and the
+  issue tracker.
   The pad's own dot has no switch — it is the only way to show the pad, and it carries the gear.
 - Sticky `CTRL/ALT/SHIFT` modifiers, **hold-to-auto-repeat** on all keys
 - **Haptics** on key taps (system CLICK effect, honours `haptic_feedback_enabled`)
@@ -586,10 +592,11 @@ adb shell am broadcast -n app.so7o.ztrackpad/.VDisplayReceiver \
 
 Ops: `status` | `create` [headless] [`--w W --h H`] | `show` | `hide` | `destroy` | `launch
 <package-or-component>` [url] | `target [display-id|package]` | `shot [--name]` | `lock on|off|toggle` |
+`flick on|off` |
 `keys [<spec>]` | `keys-reset`.
 The reply arrives as
 `Broadcast completed: result=0, data="shizuku=ready id=25 kind=floating window=shown
-surface=alive vsize=1245x1397 target=0 padlocked=false keys=default"`.
+surface=alive vsize=1245x1397 target=0 padlocked=false flick=off keys=default"`.
 
 - **The `-n` component is required.** An implicit broadcast does not reach a
   manifest-declared receiver on API 26+, so `-a` alone silently does nothing.
@@ -605,6 +612,10 @@ surface=alive vsize=1245x1397 target=0 padlocked=false keys=default"`.
   same way its lock dot does, and both go through the same code, so they cannot disagree.
   `vdisplay lock on`, `off`, or no argument to toggle; `status` then reports
   `padlocked=true`. Useful for watching something full-screen without the pad drifting.
+- **`flick on|off`** is the second non-display op: it switches the pad's edge strips between
+  scrolling live and Lite's feel — banking the whole gesture and scrolling once, on
+  release. Same setter as the CONTROLS row, so they cannot disagree; `status` reports
+  `flick=on|off`.
 - **`launch` puts an app on the display** through the same Shizuku shell bridge the
   display was created with, so it works for headless displays too: `vdisplay launch
   com.android.settings`, or `vdisplay launch com.android.chrome --url '…'`.
