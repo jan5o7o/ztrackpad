@@ -24,9 +24,19 @@ four operations, and a standard driving test ships with them.
 - `shot [--name N]` — capture the display's own pixels to `/data/local/tmp/<N>.png`;
   headless displays fail cleanly instead of hanging.
 - `create --w W --h H` — size the next display explicitly (headless included).
-- `scripts/vdisplay-test` — the standard driving test: creates, launches a target app,
-  switches the pad target, captures, and taps/types into the app on both headless and
-  floating displays, failing loudly on any assertion (11 checks).
+- `tap <x> <y>`, `type <text>`, `press <KEYCODE>` — display-routed input: every event
+  carries the target display's id via the same Shizuku path the pad's own clicks and keys
+  use, so a script drives the app *inside* the display, not the phone under it.
+- The ▣ display picker now lists the app's own floating display (it is shell-owned and
+  invisible to app-side display enumeration), so tap-to-control works: tap the square,
+  tap the display, and the pad's keyboard and pointer are aimed into it.
+- `scripts/vdisplay-test` — the standard driving test: creates, launches, aims the pad,
+  and drives taps/keystrokes into the app on headless and floating displays, proving each
+  step from the display's own pixels. Change-proofs use `shot`, never the phone screen.
+- Known residual: launching a *bare-package* app onto a just-created floating display can
+  silently land no task in rare timing windows (works on a settled display; component and
+  URL launches are unaffected). The launch loop retries with force-stop, and the test
+  reports the outcome honestly.
 
 ## 0.5.0 — 2026-09-30
 

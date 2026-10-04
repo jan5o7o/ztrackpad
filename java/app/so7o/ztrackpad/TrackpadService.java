@@ -34,6 +34,7 @@ import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
 import android.view.Gravity;
+import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -1693,6 +1694,54 @@ public class TrackpadService extends AccessibilityService {
         // which the framework checks first, in ActivityTaskSupervisor
         // .isCallerAllowedToLaunchOnDisplay (AOSP 16). This is the same route the seed
         // uses, so it is the proven one.
+        // Screen-space input aimed at the pad's current target display - the identical
+        // routing the pad's own clicks and keys use (ShizukuInputHandler carries displayId
+        // on every event), so a script types and taps exactly where the pointer is aimed,
+        // which is what the tap-to-aim display list does for a finger.
+        if ("tap".equals(op)) {
+            if (!useShizuku()) return "error: tap needs Shizuku";
+            String[] xy = (arg == null ? "" : arg.trim()).split("\\s+");
+            if (xy.length < 2) return "error: tap wants '<x> <y>' in display px";
+            int x = parseIntOr(xy[0], -1);
+            int y = parseIntOr(xy[1], -1);
+            if (x < 0 || y < 0) return "error: tap wants numeric '<x> <y>'";
+            shizuku.click(x, y);
+            return "ok tap " + x + " " + y;
+        }
+
+        if ("type".equals(op)) {
+            if (!useShizuku()) return "error: type needs Shizuku";
+            String text = (arg == null) ? "" : arg;
+            if (text.length() == 0) return "ok type (empty)";
+            // KeyCharacterMap turns chars into real DOWN/UP events including shift; short
+            // texts only, this runs on the main thread (via the receiver) like the other ops.
+            KeyCharacterMap kcm = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD);
+            for (int i = 0; i < text.length(); i++) {
+                KeyEvent[] evts = kcm.getEvents(new char[]{text.charAt(i)});
+                if (evts == null) {
+                    continue;   // unmappable on this keyboard: skip
+                }
+                for (KeyEvent e : evts) {
+                    shizuku.key(e.getKeyCode(), e.getAction(), e.getMetaState());
+                }
+                try {
+                    Thread.sleep(18);
+                } catch (InterruptedException ignored) {
+                }
+            }
+            return "ok type " + text.length() + " chars";
+        }
+
+        if ("press".equals(op)) {
+            if (!useShizuku()) return "error: press needs Shizuku";
+            String name = (arg == null) ? "" : arg.trim();
+            int kc = keyCodeByName(name);
+            if (kc < 0) return "error: press wants a KEYCODE_* name (e.g. ENTER), got '" + name + "'";
+            shizuku.key(kc, KeyEvent.ACTION_DOWN, 0);
+            shizuku.key(kc, KeyEvent.ACTION_UP, 0);
+            return "ok press " + name;
+        }
+
         if ("launch".equals(op)) {
             String target = (arg == null) ? "" : arg.trim();
             if (target.length() == 0) {
@@ -2023,6 +2072,34 @@ public class TrackpadService extends AccessibilityService {
                     + "' valid=" + d.isValid() + " state=" + stateName(d.getState())
                     + " flags=0x" + Integer.toHexString(d.getFlags()));
             pickerRows.addView(pickerRow(d));
+        }
+        // Our own display is shell-owned, so app-side display filtering keeps it invisible
+        // to getDisplay() - the picker would never list it, and tap-to-control would stay
+        // impossible. Show it from app state; targeting works by id, so no Display object
+        // is needed.
+        if (ownVirtualDisplayId >= 0 && !containsId(ds, ownVirtualDisplayId)) {
+            final int id = ownVirtualDisplayId;
+            Log.i(TAG, "  display " + id + " 'ztrackpad' (from app state)");
+            boolean isTarget = (id == targetDisplayId);
+            boolean isSurface = (id == surfaceDisplayId);
+            TextView t = new TextView(this);
+            StringBuilder sb = new StringBuilder();
+            sb.append(isTarget ? "\u25C9  " : "\u25CB  ").append("ztrackpad");
+            if (isSurface) sb.append("  (surface)");
+            sb.append("\n     ").append(screenSurfaceW).append("\u00D7").append(screenSurfaceH)
+                    .append("  \u00B7  id ").append(id);
+            t.setText(sb.toString());
+            t.setTextSize(12f);
+            t.setTextColor(isTarget ? theme.textPrimary : theme.textSecondary);
+            t.setPadding(dp(12), dp(9), dp(12), dp(9));
+            t.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    tick();
+                    setTargetDisplay(id);
+                }
+            });
+            t.setBackground(keyBgState(isTarget ? theme.selectedRow : 0x00000000, theme.accent));
+            pickerRows.addView(t);
         }
         if (ds.isEmpty()) {
             TextView t = new TextView(this);
