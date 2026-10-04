@@ -7,8 +7,10 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 /** Minimal launcher screen: status + a shortcut to the accessibility settings. */
@@ -28,9 +30,27 @@ public class MainActivity extends Activity {
         title.setTextColor(Color.WHITE);
         title.setTextSize(24f);
 
+        // The first screen of a fresh install must be usable without scrolling: the
+        // accessibility shortcut is the whole reason anyone opens this activity, so it
+        // sits right under the title and the help text scrolls below it. It used to be
+        // the last child of the layout, below the whole guide - on a small screen or
+        // DeX with a keyboard the button ended up out of reach, and a new install had
+        // to scroll a wall of text before it could enable the service.
+        Button go = new Button(this);
+        go.setText("Open Accessibility Settings");
+        go.setGravity(Gravity.CENTER);
+        go.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent i = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            }
+        });
+
         TextView body = new TextView(this);
         body.setText("\nFloating trackpad, pointer and on-screen keys.\n\n"
-                + "1. Tap the button below.\n"
+                + "1. Tap the button above.\n"
                 + "2. Enable \"" + getString(R.string.app_name) + "\" under Installed services.\n"
                 + "3. Come back here - small dots appear on screen.\n\n"
                 + "The dots\n"
@@ -64,21 +84,16 @@ public class MainActivity extends Activity {
         body.setTextColor(0xFFDDDDDD);
         body.setTextSize(14f);
 
-        Button go = new Button(this);
-        go.setText("Open Accessibility Settings");
-        go.setGravity(Gravity.CENTER);
-        go.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Intent i = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(i);
-            }
-        });
+        // The button comes first; the guide takes the remaining room and scrolls.
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(body, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams rest =
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
 
         root.addView(title);
-        root.addView(body);
         root.addView(go);
+        root.addView(scroll, rest);
         setContentView(root);
     }
 }
