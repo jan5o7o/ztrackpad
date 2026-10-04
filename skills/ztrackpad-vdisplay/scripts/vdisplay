@@ -10,6 +10,9 @@
 #   vdisplay launch <package-or-component> [--url URL]
 #   vdisplay target [<display-id>|<package>]   # no arg = read the target back
 #   vdisplay shot [--name NAME]                # -> /data/local/tmp/<NAME>.png
+#   vdisplay tap <x> <y>        # tap at these px on the target display
+#   vdisplay type <text>        # type into the focused field, spaces included
+#   vdisplay press <KEYCODE>    # one key (KeyEvent name or integer)
 #   vdisplay keys                 # print the current key layout spec
 #   vdisplay keys '<spec>'        # set a custom key layout
 #   vdisplay keys-reset           # back to the built-in layout
@@ -63,10 +66,15 @@ if [ "$op" = "keys" ] && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
     shift
 fi
 if { [ "$op" = "lock" ] || [ "$op" = "launch" ] || [ "$op" = "target" ] \
-        || [ "$op" = "tap" ] || [ "$op" = "press" ] || [ "$op" = "taskfocus" ]; } \
+        || [ "$op" = "press" ] || [ "$op" = "taskfocus" ]; } \
         && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
     arg="$1"
     shift
+fi
+# `tap` takes two display-px coordinates, joined.
+if [ "$op" = "tap" ] && [ -n "${1:-}" ]; then
+    arg="${1:-0} ${2:-0}"
+    shift 2 2>/dev/null || shift
 fi
 # `type` takes the whole remainder, spaces included.
 if [ "$op" = "type" ]; then
