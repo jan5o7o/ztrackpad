@@ -127,10 +127,11 @@ public class TrackpadService extends AccessibilityService {
      * This is the flick's gain: banked distance per px of finger travel, spent at once.
      * Lite's ratio was 2.0 - there it measured 2:1 and felt right - but a wheel unit on
      * this build moves about as far as a stroke pixel did there, so the ratio had to come
-     * down. 1.0 (1:1) still felt like too much travel; 0.8 is the current setting: a swipe
-     * moves the page about four-fifths as far as the finger, in one go.
+     * down a lot. The tuning log: 2.0 too big a jump, 1.0 still too far, 0.8 still too
+     * fast. 0.4 is the current setting: a swipe moves the page about two-fifths as far
+     * as the finger, in one go.
      */
-    private static final float EDGE_FLICK_GAIN = 0.8f;
+    private static final float EDGE_FLICK_GAIN = 0.4f;
     /** Ceiling on one flick, as a fraction of the screen height - a long fling stays a fling. */
     private static final float SCROLL_CAP_SCREEN = 0.6f;
     /**
