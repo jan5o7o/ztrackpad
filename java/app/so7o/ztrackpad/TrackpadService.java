@@ -246,6 +246,11 @@ public class TrackpadService extends AccessibilityService {
      * PUBLIC task-hosting display needs CAPTURE_VIDEO_OUTPUT, which only shell holds.
      */
     private int ownVirtualDisplayId = -1;
+    /**
+     * Size request from the last `vdisplay create --w/--h`, or -1 for the defaults
+     * (1920x1080 headless, the floating window's own size). Applied to that create only.
+     */
+    private int pendingDisplayW = -1, pendingDisplayH = -1;
     private CursorView cursor;
     private TextView moveChip;
     /** The pad's lock dot, so a theme rebuild can hand back a new one. */
@@ -1314,9 +1319,11 @@ public class TrackpadService extends AccessibilityService {
         }
         if (ownVirtualDisplayId >= 0) releaseOwnVirtualDisplay();
         if (!useShizuku()) { Log.w(TAG, "virtual display needs Shizuku"); return; }
-        ownVirtualDisplayId = shizuku.createVirtualDisplay("ztrackpad", 1920, 1080, 320);
+        int w = (pendingDisplayW > 0) ? pendingDisplayW : 1920;
+        int h = (pendingDisplayH > 0) ? pendingDisplayH : 1080;
+        ownVirtualDisplayId = shizuku.createVirtualDisplay("ztrackpad", w, h, 320);
         virtualDisplayHasSurface = false;
-        Log.i(TAG, "virtual display -> id " + ownVirtualDisplayId);
+        Log.i(TAG, "virtual display -> id " + ownVirtualDisplayId + " " + w + "x" + h);
         // surface = null means no render target: the display comes up OFF, its windows
         // are INVISIBLE, and injected clicks do NOT land. It hosts tasks, but it is not
         // a usable control target - use the floating (surface-backed) one for that.
@@ -1489,7 +1496,8 @@ public class TrackpadService extends AccessibilityService {
      *
      * Returns one machine-readable line so a script can parse it.
      */
-    public String vdisplayCommand(String op, boolean headless, String spec, String arg) {
+    public String vdisplayCommand(String op, boolean headless, String spec, String arg,
+                                  int displayW, int displayH, String url) {
         if (op == null || op.length() == 0) op = "status";
         if ("status".equals(op)) return vdisplayStatus();
 
@@ -1547,22 +1555,49 @@ public class TrackpadService extends AccessibilityService {
         }
 
         if ("create".equals(op)) {
+            // Optional `--w/--h` size request from the broadcast extras. Applied to this
+            // create only; the defaults return once the op finishes.
+            if ((displayW > 0) != (displayH > 0)) {
+                return "error: create wants both --w and --h, or neither (got "
+                        + displayW + "x" + displayH + ")";
+            }
+            if (displayW > 0 && (displayW < 240 || displayH < 240
+                    || displayW > 7680 || displayH > 7680)) {
+                return "error: create dimensions out of range ("
+                        + displayW + "x" + displayH + ")";
+            }
+            pendingDisplayW = (displayW > 0) ? displayW : -1;
+            pendingDisplayH = (displayH > 0) ? displayH : -1;
             if (headless) {
                 boolean up = (ownVirtualDisplayId >= 0 && !virtualDisplayHasSurface);
-                if (!up) toggleOwnVirtualDisplay();
-                return "ok create-headless " + vdisplayStatus();
+                if (up) {
+                    if (pendingDisplayW > 0 && shizuku != null) {
+                        shizuku.resizeVirtualDisplay(pendingDisplayW, pendingDisplayH, 320);
+                    }
+                } else {
+                    toggleOwnVirtualDisplay();
+                }
+            } else {
+                boolean floatingUp = (ownVirtualDisplayId >= 0 && virtualDisplayHasSurface);
+                if (pendingDisplayW > 0) {
+                    // a requested size sizes the floating window; the surface (and with it
+                    // the display) follows it via the existing resize chain
+                    resizeScreenPanelTo(pendingDisplayW, pendingDisplayH);
+                }
+                if (!floatingUp) {
+                    // Showing the window is all we can do here: the display is created from
+                    // the surface callback, so it will not exist yet. Poll status.
+                    if (screenPanel != null) screenPanel.setVisibility(View.VISIBLE);
+                    raise(cursor, cursorLp, "cursor");
+                    updateVirtualRow();
+                } else if (screenPanel != null && screenPanel.getVisibility() != View.VISIBLE) {
+                    toggleVirtualScreen();
+                }
             }
-            boolean floatingUp = (ownVirtualDisplayId >= 0 && virtualDisplayHasSurface);
-            if (!floatingUp) {
-                // Showing the window is all we can do here: the display is created from the
-                // surface callback, so it will not exist yet. Poll status.
-                if (screenPanel != null) screenPanel.setVisibility(View.VISIBLE);
-                raise(cursor, cursorLp, "cursor");
-                updateVirtualRow();
-            } else if (screenPanel != null && screenPanel.getVisibility() != View.VISIBLE) {
-                toggleVirtualScreen();
-            }
-            return "ok create-floating " + vdisplayStatus();
+            pendingDisplayW = -1;
+            pendingDisplayH = -1;
+            return headless ? "ok create-headless " + vdisplayStatus()
+                            : "ok create-floating " + vdisplayStatus();
         }
 
         // The controls panel, like the tasks panel: scriptable so it can be shown without a
@@ -1652,8 +1687,221 @@ public class TrackpadService extends AccessibilityService {
             return "ok taskfocus " + id + " role=" + (row.fullscreen ? "fullscreen" : "floating");
         }
 
+        // Start an app on the display we own, shell-side. `am start --display` from adb
+        // shell can be refused for displays like ours, and the shell process this app
+        // already keeps is both the display's owner and holds INTERNAL_SYSTEM_WINDOW -
+        // which the framework checks first, in ActivityTaskSupervisor
+        // .isCallerAllowedToLaunchOnDisplay (AOSP 16). This is the same route the seed
+        // uses, so it is the proven one.
+        if ("launch".equals(op)) {
+            String target = (arg == null) ? "" : arg.trim();
+            if (target.length() == 0) {
+                return "error: launch wants a package or component in arg"
+                        + " (com.android.settings, or com.android.settings/.Settings)";
+            }
+            if (ownVirtualDisplayId < 0) return "error: launch needs a display - create one first";
+            if (!useShizuku()) return "error: launch needs Shizuku";
+            StringBuilder cmd = new StringBuilder("am start --display ")
+                    .append(ownVirtualDisplayId).append(" -f 0x10000000");
+            if (url != null && url.length() > 0) {
+                cmd.append(" -a android.intent.action.VIEW -d ").append(shellQuote(url));
+            }
+            // a '/' makes it a component; without one am resolves the package itself
+            if (target.indexOf('/') >= 0) cmd.append(" -n ").append(shellQuote(target));
+            else cmd.append(' ').append(shellQuote(target));
+            String out;
+            try {
+                out = String.valueOf(shizuku.run(cmd.toString()));
+            } catch (Throwable t) {
+                Log.w(TAG, "launch: " + t);
+                return "error: launch " + t;
+            }
+            String trimmed = out.trim();
+            String low = trimmed.toLowerCase();
+            if (low.indexOf("error") >= 0 || low.indexOf("exception") >= 0
+                    || low.indexOf("denied") >= 0 || low.indexOf("not found") >= 0) {
+                return "error: launch " + trimmed.replace('\n', ' ');
+            }
+            int nl = trimmed.indexOf('\n');
+            String line = (nl >= 0) ? trimmed.substring(0, nl).trim() : trimmed;
+            return "ok launch display=" + ownVirtualDisplayId + " target=" + target
+                    + (line.length() == 0 ? "" : " " + line);
+        }
+
+        // Point the pad's input at a display, exactly like tapping a row in the ▣ picker
+        // - same setter, so a script cannot get a different result from a finger. A
+        // numeric arg is a display id; anything else is a package whose current task
+        // names its display.
+        if ("target".equals(op)) {
+            String what = (arg == null) ? "" : arg.trim();
+            if (what.length() == 0) {
+                Display cur = (displayManager == null) ? null
+                        : displayManager.getDisplay(targetDisplayId);
+                String name = (cur == null) ? "" : " " + cur.getName();
+                return "ok target " + targetDisplayId + name;
+            }
+            int id = parseIntOr(what, -2);
+            if (id < 0) {
+                id = displayIdForPackage(what);
+                if (id < 0) {
+                    return "error: target: '" + what + "' is no display id and no running"
+                            + " package";
+                }
+            }
+            Display d = (displayManager == null) ? null : displayManager.getDisplay(id);
+            if (d == null || !d.isValid()) {
+                return "error: target: display " + id + " is not attached";
+            }
+            setTargetDisplay(id);
+            return "ok target " + id + " " + d.getName() + " " + outW + "x" + outH;
+        }
+
+        // Capture the display's own pixels straight from SurfaceFlinger, so a script can
+        // verify content without the composite (overlay) noise of a phone-screen capture.
+        if ("shot".equals(op)) {
+            if (ownVirtualDisplayId < 0) return "error: shot needs a display - create one first";
+            if (!useShizuku()) return "error: shot needs Shizuku";
+            String name = (arg == null) ? "" : arg.trim();
+            if (name.length() == 0) name = "vdisplay-" + ownVirtualDisplayId;
+            name = name.replaceAll("[^A-Za-z0-9._-]", "_");
+            String path = "/data/local/tmp/" + name + ".png";
+            String err = captureDisplayPng(ownVirtualDisplayId, path);
+            if (err != null) return err;
+            return "ok shot " + path;
+        }
+
         return "error: unknown op '" + op + "' (status|create|destroy|show|hide|lock|keys"
-                + "|keys-reset|keys-mode|bubbles|controls|tasks|taskfocus)";
+                + "|keys-reset|keys-mode|bubbles|controls|tasks|taskfocus|launch|target|shot)";
+    }
+
+    /**
+     * The display a package's top task currently lives on, or -1. Reuses the same
+     * filtered `dumpsys activity activities` the tasks list uses: each `Display #N`
+     * section header is followed by that display's tasks, and a task names its package
+     * in the `A=<uid>:<pkg>` token. This is how `vdisplay target <package>` works, and
+     * it reads nothing.
+     */
+    private int displayIdForPackage(String pkg) {
+        if (!useShizuku() || pkg == null || pkg.length() == 0) return -1;
+        String dump = shizuku.run(TASKS_CMD);
+        if (dump == null) return -1;
+        int current = -1;
+        String[] lines = dump.split("\n");
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            int d = line.indexOf("Display #");
+            if (d >= 0) {
+                current = parseIntOr(nextToken(line, d + 9), -1);
+                continue;
+            }
+            if (line.indexOf("* Task{") < 0) continue;
+            int a = line.indexOf("A=");
+            if (a < 0) continue;
+            String spec = nextToken(line, a + 2);
+            int colon = spec.indexOf(':');
+            if (colon < 0) continue;
+            String taskPkg = spec.substring(colon + 1);
+            if (taskPkg.endsWith(".root")) {
+                taskPkg = taskPkg.substring(0, taskPkg.length() - 5);
+            }
+            if (pkg.equals(taskPkg)) return current;
+        }
+        return -1;
+    }
+
+    /**
+     * Scripted resize of the floating window, applied by `vdisplay create --w/--h`
+     * before the surface exists. Clamped to the surface display (a window cannot be
+     * bigger than the screen it is drawn on) with the aspect kept, and the result is
+     * saved so a later restore does not fight it.
+     */
+    private void resizeScreenPanelTo(int w, int h) {
+        if (screenPanel == null || screenPanelLp == null) return;
+        if (w <= 0 || h <= 0) return;
+        float aspect = (float) w / (float) h;
+        int nw = w, nh = h;
+        if (nw > screenW || nh > screenH) {
+            if ((float) screenW / (float) screenH > aspect) {
+                nh = screenH;
+                nw = Math.round(nh * aspect);
+            } else {
+                nw = screenW;
+                nh = Math.round(nw / aspect);
+            }
+        }
+        screenPanelLp.width = nw;
+        screenPanelLp.height = nh;
+        screenPanelLp.x = Math.max(0, (screenW - nw) / 2);
+        screenPanelLp.y = Math.max(0, (screenH - nh) / 2);
+        clampGeometryToScreen(screenPanelLp);
+        try { wm.updateViewLayout(screenPanel, screenPanelLp); } catch (Exception ignored) {}
+        saveGeometry(screenPanelLp, SCREEN_KEY);
+        Log.i(TAG, "screen panel resized to " + screenPanelLp.width + "x" + screenPanelLp.height);
+    }
+
+    /**
+     * Single-quote a value for the device shell (`sh -c`), so '&' '?' or spaces in a
+     * URL are not re-parsed as shell syntax inside ShellUserService.runCommand.
+     */
+    private static String shellQuote(String s) {
+        return "'" + s.replace("'", "'\\''") + "'";
+    }
+
+    /**
+     * Screencap one of our displays straight to a shell-writable path, bypassing the
+     * phone-screen composite. screencap -d wants SurfaceFlinger's own display value
+     * (raw Android display ids are rejected on this device), so the candidates tried
+     * are the value from the `Display <value> (Virtual display)` line for a display
+     * named "ztrackpad" in `dumpsys SurfaceFlinger --display-id`, then the Android id.
+     * An OFF headless display may legitimately capture nothing: the result is verified
+     * by file size, and failures are reported instead of assumed.
+     */
+    private String captureDisplayPng(int displayId, String path) {
+        String[] candidates = { String.valueOf(displayId) };
+        String sf;
+        try {
+            sf = String.valueOf(shizuku.run("dumpsys SurfaceFlinger --display-id"));
+        } catch (Throwable t) {
+            Log.w(TAG, "sf display-id: " + t);
+            sf = "";
+        }
+        if (sf != null) {
+            String[] lines = sf.split("\n");
+            for (int i = 0; i < lines.length && candidates.length == 1; i++) {
+                if (lines[i].indexOf("(Virtual display)") < 0) continue;
+                if (lines[i].indexOf("displayName=\"ztrackpad\"") < 0) continue;
+                int p = lines[i].indexOf("Display ");
+                if (p >= 0) {
+                    candidates = new String[] { nextToken(lines[i], p + 8),
+                            String.valueOf(displayId) };
+                }
+            }
+        }
+        for (int i = 0; i < candidates.length; i++) {
+            try {
+                shizuku.run("timeout 5 screencap -d " + candidates[i] + " -p " + path);
+            } catch (Throwable t) {
+                Log.w(TAG, "screencap: " + t);
+                continue;
+            }
+            if (pathBytes(path) > 100) return null;
+        }
+        return "error: shot: could not capture display " + displayId
+                + " (is it headless/OFF?)";
+    }
+
+    /** Size of a shell-side file, or -1. `wc -c` prints just the byte count. */
+    private long pathBytes(String path) {
+        String out;
+        try {
+            out = String.valueOf(shizuku.run("wc -c < " + path));
+        } catch (Throwable t) {
+            Log.w(TAG, "wc: " + t);
+            return -1;
+        }
+        String[] tokens = out.trim().split("\\s+");
+        if (tokens.length == 0) return -1;
+        try { return Long.parseLong(tokens[0]); } catch (Throwable t) { return -1; }
     }
 
     /** One line of key=value pairs, for scripts to parse. */

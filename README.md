@@ -235,7 +235,7 @@ improvise around them.
 | Install packages, fetch the jar, build, sign, install | **yes** | plain shell, all above |
 | Enable the accessibility service | **yes** | step 4; append, never clobber |
 | Verify state | **yes** | prefer the broadcast `status`; logcat only logs at startup |
-| Create/show/hide/destroy a virtual display | **yes** | `skills/ztrackpad-vdisplay/` (or the raw broadcast) |
+| Create/show/hide/destroy a virtual display, launch apps on it, retarget the pad, capture its pixels | **yes** | `skills/ztrackpad-vdisplay/` (or the raw broadcast) |
 | **Enable wireless debugging** | **no** | Developer-options toggle. Must already be on. |
 | **Start Shizuku** | **no** | needs the Shizuku app, or a human-initiated start. Not persistent without root, so it must be redone after every reboot. |
 | Grant the Shizuku permission | **no** | a runtime dialog; `pm grant` does not cover this one |
@@ -584,7 +584,8 @@ adb shell am broadcast -n app.so7o.ztrackpad/.VDisplayReceiver \
     -a app.so7o.ztrackpad.VDISPLAY --es op status
 ```
 
-Ops: `status` | `create` [headless] | `show` | `hide` | `destroy` | `lock on|off|toggle` |
+Ops: `status` | `create` [headless] [`--w W --h H`] | `show` | `hide` | `destroy` | `launch
+<package-or-component>` [url] | `target [display-id|package]` | `shot [--name]` | `lock on|off|toggle` |
 `keys [<spec>]` | `keys-reset`.
 The reply arrives as
 `Broadcast completed: result=0, data="shizuku=ready id=25 kind=floating window=shown
@@ -604,9 +605,16 @@ surface=alive vsize=1245x1397 target=0 padlocked=false keys=default"`.
   same way its lock dot does, and both go through the same code, so they cannot disagree.
   `vdisplay lock on`, `off`, or no argument to toggle; `status` then reports
   `padlocked=true`. Useful for watching something full-screen without the pad drifting.
-- **There is no scriptable way to set the *target*.** Which display the trackpad
-  drives is chosen in the picker only; the broadcast covers the display's lifecycle,
-  not what it points at.
+- **`launch` puts an app on the display** through the same Shizuku shell bridge the
+  display was created with, so it works for headless displays too: `vdisplay launch
+  com.android.settings`, or `vdisplay launch com.android.chrome --url '…'`.
+- **`target <id>` points the trackpad's input at a display**, using exactly the code
+  path the `▣` picker uses — the picker's choice is now scriptable, and
+  `vdisplay target` (no argument) reads it back. A package name works too: the display
+  its task is on.
+- **`shot --name N` captures the display's own pixels** (via `screencap -d` inside the
+  shell process) to `/data/local/tmp/N.png`, so an agent can verify content without the
+  phone-screen composite. Headless displays fail cleanly — they have no pixels.
 
 See `skills/ztrackpad-vdisplay/SKILL.md` for the full reference. The script is
 `skills/ztrackpad-vdisplay/scripts/vdisplay`, and `extensions/vdisplay.ts` exposes it to pi as

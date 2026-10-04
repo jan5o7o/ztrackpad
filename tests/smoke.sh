@@ -176,6 +176,42 @@ else
 fi
 
 echo
+echo "== the testing ops' fail-closed paths"
+
+# The testing ops fail closed without a display, and must not touch a live one. All of
+# these run only when no display is up, so a concurrent test cannot be disturbed.
+kind_now=$(field "$(state_line status)" kind)
+if [ "$kind_now" = "none" ]; then
+    if printf '%s' "$(state_line launch --es arg com.android.settings)" | grep -q '^error:'; then
+        ok "launch without a display fails closed"
+    else
+        bad "launch without a display did not fail closed"
+    fi
+    if printf '%s' "$(state_line shot)" | grep -q '^error:'; then
+        ok "shot without a display fails closed"
+    else
+        bad "shot without a display did not fail closed"
+    fi
+    if printf '%s' "$(state_line create --ei w 400 --ei h 200)" | grep -q '^error:'; then
+        ok "create rejects an improbable size (400x200)"
+    else
+        bad "create accepted an improbable size"
+    fi
+else
+    info "a display is already up (kind=$kind_now) - skipping the no-display checks"
+fi
+if printf '%s' "$(state_line target --es arg 999998)" | grep -q '^error:'; then
+    ok "target with a bogus display id fails closed"
+else
+    bad "target with a bogus display id did not fail closed"
+fi
+if printf '%s' "$(state_line target)" | grep -q '^ok target'; then
+    ok "target reads the current target back"
+else
+    bad "target did not read the current target back"
+fi
+
+echo
 echo "== floating windows (pop-up view)"
 
 # Read over the shell bridge from `dumpsys activity activities`, because cross-app tasks

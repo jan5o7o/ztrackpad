@@ -1,6 +1,6 @@
 ---
 name: ztrackpad-vdisplay
-description: Create, show, hide and destroy ztrackpad's Android virtual display from a script, and read its state. Use when asked to open or close a second/virtual screen, float a display, run apps on a background display, or check whether the virtual display is up.
+description: Create, show, hide and destroy ztrackpad's Android virtual display from a script; launch apps on it; point the trackpad's input at a display; and capture the display's own pixels. Use when asked to open or close a second/virtual screen, float a display, run apps on a background display, switch which display the trackpad drives, or check whether the virtual display is up.
 ---
 
 # ztrackpad-vdisplay
@@ -24,9 +24,18 @@ Scripts live next to this file; run them from here.
 scripts/vdisplay status                 # one line of key=value
 scripts/vdisplay create                 # floating: visible in the top half
 scripts/vdisplay create --headless      # headless: runs apps, nothing to look at
+scripts/vdisplay create --w 1812 --h 2176      # a display at these dimensions
+scripts/vdisplay create --headless --w 1812 --h 2176
 scripts/vdisplay show
 scripts/vdisplay hide
 scripts/vdisplay destroy
+scripts/vdisplay launch com.android.settings            # package (resolved by am)
+scripts/vdisplay launch com.android.settings/.Settings   # explicit component
+scripts/vdisplay launch com.android.chrome --url 'https://www.youtube.com/'
+scripts/vdisplay target 0                  # pad input -> the phone display
+scripts/vdisplay target                    # read the current target back
+scripts/vdisplay shot                      # -> /data/local/tmp/vdisplay-<id>.png
+scripts/vdisplay shot --name verify        # -> /data/local/tmp/verify.png
 ```
 
 Equivalent one-liners, if the script is unavailable:
@@ -45,6 +54,12 @@ adb shell am broadcast -n app.so7o.ztrackpad/.VDisplayReceiver \
 
 They are mutually exclusive: ztrackpad holds one display slot, so creating one
 releases the other.
+
+`create --w W --h H` sizes the next display instead of the defaults (1920x1080 for
+the headless variant; the floating variant sizes its window — and therefore its
+display — to the request, clamped to the phone screen). The headless variant takes
+the size exactly; a floating display cannot be bigger than the screen it is drawn on,
+so `status` reports the size that actually came up.
 
 ## Output
 
@@ -79,7 +94,10 @@ shizuku=ready id=25 kind=floating window=shown surface=alive vsize=1245x1397 tar
   up as an infinite mirror because the window is drawn on that same display.
 - **The receiver is exported without a permission**, so any app on the device can
   toggle the display. The worst case is a display appearing or disappearing.
-- **Put an app on it** with `am start --display <id> -f 0x10000000 -n <component>`.
+- **Put an app on it** with `scripts/vdisplay launch <package-or-component>` — or, if
+the script is unavailable, `am start --display <id> -f 0x10000000 -n <component>`
+from adb. The adb route can be refused for headless displays; `launch` goes through
+ztrackpad's shell bridge and does not have that limit.
 
 ## Locking the pad
 
@@ -143,16 +161,74 @@ and silently truncated:
 `scripts/vdisplay` quotes the spec for the remote shell, so use it rather than a raw
 `am broadcast` line.
 
+## Launching an app on it
+
+```bash
+scripts/vdisplay launch com.android.settings             # package: am resolves it
+scripts/vdisplay launch com.android.settings/.Settings    # explicit component
+scripts/vdisplay launch com.android.chrome --url 'https://…'
+```
+
+`launch` starts the app on the display ztrackpad owns (`status`'s `id`). It runs inside
+ztrackpad's Shizuku shell process, so it never crosses adb and the platform cannot
+refuse it for a headless display: the shell is that display's owner and holds
+`INTERNAL_SYSTEM_WINDOW`, which the framework checks first
+(`ActivityTaskSupervisor.isCallerAllowedToLaunchOnDisplay`).
+The reply is `ok launch display=<id> target=<pkg>` plus am's own first line
+(`Starting: Intent { … }`, or a warning when the app was already on top).
+
+## Pointing the trackpad at it
+
+The pad's input target (`target=` in `status`) was picker-only until now; the `target`
+op uses the picker's exact code path, so a script cannot get a different result from a
+finger:
+
+```bash
+scripts/vdisplay target 0          # the phone display
+scripts/vdisplay target <id>       # the display id `status` just reported
+scripts/vdisplay target com.android.settings   # the display that package is running on
+scripts/vdisplay target            # read it back: `ok target 0 Built-in Screen`
+```
+
+## Capturing the display's own pixels
+
+The floating display renders into a window on the phone, so a plain `screencap` gets
+you the phone composite — including every overlay on it. `shot` bypasses that: it
+runs `screencap -d` inside the shell process against the SurfaceFlinger value for the
+ztrackpad display, and writes a PNG the agent can pull.
+
+```bash
+scripts/vdisplay shot              # /data/local/tmp/vdisplay-<id>.png
+scripts/vdisplay shot --name verify
+adb pull /data/local/tmp/verify.png ~/verify.png
+```
+
+- The PNG lands in `/data/local/tmp` (shell-writable) so `adb pull` can reach it.
+- A **headless** display has no pixels to composite in the first place — `shot` fails
+  cleanly with `error: shot: could not capture` rather than hanging.
+
 ## Driving it
 
 Point the trackpad at the display before injecting input:
 
-1. Open the `▣` picker and tap the display's row (this sets the *target*), **or** it
-   arrives as a target automatically via the broadcast-free UI only — there is no
-   scriptable "set target" yet.
+1. `scripts/vdisplay target <id>` — the `target` op does exactly what tapping the
+   `▣` picker's row does (same setter), and `scripts/vdisplay target` with no argument
+   reads the current target back.
 2. Then drag on the pad to move the pointer and tap to click.
 
 Pointer visibility depends on the target: on the phone screen the arrow is an overlay
 there; on a floating display it is drawn over that window; on an external display
 (XREAL/DeX) it is a second overlay window opened *on* that display, because a window
 we own cannot be composited into another display's output.
+
+## Automating a whole test pass
+
+The pieces chain: create a display, launch the app under test on it, set the target so
+the pad drives it, then verify from the display's own pixels.
+
+```bash
+scripts/vdisplay create --headless --w 1812 --h 2176   # or create (floating)
+scripts/vdisplay launch com.android.settings
+scripts/vdisplay target "$(scripts/vdisplay status | sed -n 's/.* id=\([0-9-]*\).*/\1/p')"
+scripts/vdisplay shot --name app-state
+```
