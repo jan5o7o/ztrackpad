@@ -2625,7 +2625,7 @@ public class TrackpadService extends AccessibilityService {
         bbg.setCornerRadii(new float[]{0, 0, 0, 0, dp(theme.radius), dp(theme.radius), dp(theme.radius), dp(theme.radius)});
         bbg.setColor(fill(theme.panelBar));
         bar.setBackground(bbg);
-        bar.setPadding(dp(30), 0, dp(30), dp(2)); // keep the corners clear for the resize grips; the dp(2) lifts the buttons off the pad's bottom edge
+        bar.setPadding(dp(30), 0, dp(30), dp(8)); // keep the corners clear for the resize grips; the dp(8) sits the buttons clearly above the pad's bottom edge
 
         // Action bar, per user spec: backspace / enter / right-click / pointer toggle
         bar.addView(makeRepeatButton("\u232B", new Runnable() {          // backspace (hold to repeat)
