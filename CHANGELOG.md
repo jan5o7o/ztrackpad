@@ -31,6 +31,12 @@ it can only ever describe the app as shipped.
   documented and what `scripts/vdisplay-test` actually calls (`tap 500 300`), so the
   driving test's taps now land where they say. `type` and `press` were already correct.
 
+### Extension
+
+- The `vdisplay` pi extension now also exposes `tap <x> <y>`, `type <text>` and
+  `press <KEYCODE>`, so an agent can drive the app on a display straight from pi
+  instead of hand-rolling `adb shell input -d <id>` (display-routed either way).
+
 ## 0.6.0 — 2026-10-04
 
 ### Virtual display testing ops
