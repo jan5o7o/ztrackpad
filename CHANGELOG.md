@@ -9,6 +9,21 @@ it can only ever describe the app as shipped.
 
 ## Unreleased
 
+### Features
+
+- **Flick to scroll** (CONTROLS > SCROLLING): the pad's edge strips normally scroll
+  live while your finger moves. Flip this on and they bank the whole gesture and
+  spend it as one smooth motion on release, the feel of So7o Z Trackpad Lite, ported as an
+  option. Also scriptable: `vdisplay flick on|off`, and `status` reports `flick=`.
+- **Scroll marks** (CONTROLS > SCROLLING): dotted lines down the pad's sides mark where
+  the edge-scroll strips are, like a laptop trackpad. On by default; `vdisplay marks
+  on|off` scripts it, and `status` reports `marks=`.
+- **First-run launcher**: the Open Accessibility Settings button is the first thing
+  under the title (it used to sit below the whole guide), and the top padding follows
+  the real status-bar inset so Android 15+'s edge-to-edge drawing no longer cuts it off.
+- The pad's bottom buttons gain hairline seams between them, and the action bar floats
+  off the pad's bottom edge.
+
 ### Bugfixes
 
 - `scripts/vdisplay tap` now consumes **both** coordinates (`tap <x> <y>`) instead of

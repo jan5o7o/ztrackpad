@@ -59,14 +59,25 @@ ls "$BUILD/gen/app/so7o/ztrackpad/"
 
 echo "==> 3/6 javac"
 find "$ROOT/java" "$BUILD/gen" -name '*.java' > "$BUILD/sources.txt"
-javac \
+# Capture the output instead of piping it into a filter. The previous form piped javac through
+# `grep -viE ... || true`, which meant a compile error was printed and then *ignored*: the build
+# went on to d8 the classes javac had managed to emit and packaged an APK with a dex that was
+# missing whole classes. It installed, and crashed with ClassNotFoundException at service
+# start (same fix as Lite's build.sh). Warnings are still filtered, but a non-zero exit is
+# now fatal.
+if ! javac \
   -source 8 -target 8 \
   -bootclasspath "$ANDROID_JAR" \
   -cp "$CP" \
   -encoding UTF-8 \
   -nowarn \
   -d "$BUILD/classes" \
-  @"$BUILD/sources.txt" 2>&1 | grep -viE "bootstrap class path|source value 8|target value 8|deprecat" || true
+  @"$BUILD/sources.txt" > "$BUILD/javac.log" 2>&1; then
+  cat "$BUILD/javac.log"
+  echo "javac failed - refusing to package a partial dex" >&2
+  exit 1
+fi
+grep -viE "bootstrap class path|source value 8|target value 8|deprecat" "$BUILD/javac.log" || true
 [ -d "$BUILD/classes/app/so7o/ztrackpad" ] || { echo "javac produced no classes"; exit 1; }
 
 echo "==> 4/6 d8"
