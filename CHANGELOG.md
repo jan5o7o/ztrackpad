@@ -9,7 +9,24 @@ it can only ever describe the app as shipped.
 
 ## Unreleased
 
-Nothing yet.
+## 0.6.0 — 2026-10-04
+
+### Virtual display testing ops
+
+The virtual display is now a first-class agent/test surface: `scripts/vdisplay` gained
+four operations, and a standard driving test ships with them.
+
+- `launch <package-or-component> [--url]` — start an app on the display from the shell
+  privilege path ztrackpad already owns, which works where `am start --display` from adb is
+  refused (headless displays, in particular).
+- `target [<id>|<package>]` — move the pad's input target programmatically (same code path
+  as the ▣ picker); call with no argument to read it back. The reply names the display.
+- `shot [--name N]` — capture the display's own pixels to `/data/local/tmp/<N>.png`;
+  headless displays fail cleanly instead of hanging.
+- `create --w W --h H` — size the next display explicitly (headless included).
+- `scripts/vdisplay-test` — the standard driving test: creates, launches a target app,
+  switches the pad target, captures, and taps/types into the app on both headless and
+  floating displays, failing loudly on any assertion (11 checks).
 
 ## 0.5.0 — 2026-09-30
 

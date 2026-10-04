@@ -10,7 +10,7 @@ feature branches pull-request into `dev`, then `dev` pull-requests into `main`.
 ```bash
 # 1. on dev: the version lives in AndroidManifest.xml - bump BOTH numbers there.
 #    versionCode must increase every release, or Android refuses the update.
-sed -i 's/versionCode="3"/versionCode="4"/; s/versionName="0.4.0"/versionName="0.5.0"/' AndroidManifest.xml
+sed -i 's/versionCode="4"/versionCode="5"/; s/versionName="0.5.0"/versionName="0.6.0"/' AndroidManifest.xml
 
 # 2. the changelog entry IS the release notes - write it above "## Unreleased"
 $EDITOR CHANGELOG.md
@@ -30,10 +30,10 @@ unzip -p out/ztrackpad.apk classes.dex | strings | grep -c 'com\.pi\.'    # must
 sha256sum out/ztrackpad.apk
 
 # 6. tag the commit you built, and attach the APK with the notes from the changelog
-git tag -a v0.4.0 -m 'So7o Z Trackpad 0.4.0' && git push origin v0.4.0
-awk '/^## 0.4.0/{f=1;next} /^## /{f=0} f' CHANGELOG.md > "$TMPDIR/notes.md"
+git tag -a v0.6.0 -m 'So7o Z Trackpad 0.6.0' && git push origin v0.6.0
+awk '/^## 0.6.0/{f=1;next} /^## /{f=0} f' CHANGELOG.md > "$TMPDIR/notes.md"
 echo "sha256: $(sha256sum out/ztrackpad.apk | cut -d' ' -f1)" >> "$TMPDIR/notes.md"
-gh release create v0.4.0 out/ztrackpad.apk --title 'So7o Z Trackpad 0.4.0' --notes-file "$TMPDIR/notes.md"
+gh release create v0.6.0 out/ztrackpad.apk --title 'So7o Z Trackpad 0.6.0' --notes-file "$TMPDIR/notes.md"
 ```
 
 Rules that came from getting one of these wrong:
