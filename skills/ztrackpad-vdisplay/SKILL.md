@@ -38,6 +38,7 @@ scripts/vdisplay shot                      # -> /data/local/tmp/vdisplay-<id>.pn
 scripts/vdisplay shot --name verify        # -> /data/local/tmp/verify.png
 scripts/vdisplay lock on                   # freeze the pad's position and size
 scripts/vdisplay flick on                  # edge strips bank the gesture, scroll on release
+scripts/vdisplay marks on                   # dotted lines where the edge scroll strips are
 ```
 
 Equivalent one-liners, if the script is unavailable:
@@ -68,7 +69,7 @@ so `status` reports the size that actually came up.
 `status` prints one line of `key=value` pairs:
 
 ```
-shizuku=ready id=25 kind=floating window=shown surface=alive vsize=1245x1397 target=0 padlocked=false flick=off keys=default
+shizuku=ready id=25 kind=floating window=shown surface=alive vsize=1245x1397 target=0 padlocked=false flick=off marks=on keys=default
 ```
 
 | key | meaning |
@@ -82,6 +83,7 @@ shizuku=ready id=25 kind=floating window=shown surface=alive vsize=1245x1397 tar
 | `target` | which display the trackpad is currently driving |
 | `padlocked` | whether the trackpad refuses to move or resize |
 | `flick` | `on` or `off` — whether the edge strips bank the gesture and scroll once on release |
+| `marks` | `on` or `off` — whether the pad shows dotted lines where the edge strips are |
 | `keys` | `default` or `custom` — whether the keys panel is the built-in layout |
 
 ## Things worth knowing

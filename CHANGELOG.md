@@ -15,6 +15,9 @@ it can only ever describe the app as shipped.
   live while your finger moves. Flip this on and they bank the whole gesture and
   spend it as one smooth motion on release, the feel of So7o Z Trackpad Lite, ported as an
   option. Also scriptable: `vdisplay flick on|off`, and `status` reports `flick=`.
+- **Scroll marks** (CONTROLS > SCROLLING): dotted lines down the pad's sides mark where
+  the edge-scroll strips are, like a laptop trackpad. On by default; `vdisplay marks
+  on|off` scripts it, and `status` reports `marks=`.
 
 ### Bugfixes
 

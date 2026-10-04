@@ -193,6 +193,33 @@ if [ "$flick_was" = "on" ]; then
 fi
 
 echo
+echo "== scroll-marks round-trip (original restored afterwards)"
+
+# Cosmetic twin of flick: same broadcast journey, same setter as the CONTROLS row.
+marks_was=$(field "$(state_line status)" marks)
+state_line marks --es arg on >/dev/null
+if [ "$(field "$(state_line status)" marks)" = "on" ]; then
+    ok "marks on -> status marks=on"
+else
+    bad "marks on did not report marks=on"
+fi
+state_line marks --es arg off >/dev/null
+if [ "$(field "$(state_line status)" marks)" = "off" ]; then
+    ok "marks off -> status marks=off"
+else
+    bad "marks off did not report marks=off"
+fi
+if printf '%s' "$(state_line marks --es arg maybe)" | grep -q '^error:'; then
+    ok "marks rejects anything but on|off"
+else
+    bad "marks accepted something other than on|off"
+fi
+if [ "$marks_was" = "on" ]; then
+    state_line marks --es arg on >/dev/null
+    info "marks was on before this run, left on"
+fi
+
+echo
 echo "== the documented implicit-broadcast trap"
 
 implicit=$(adb shell am broadcast -a "$pkg.VDISPLAY" --es op status 2>&1)

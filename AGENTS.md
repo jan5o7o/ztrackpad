@@ -120,7 +120,9 @@ size), `show`, `hide`, `destroy`, `keys`
 `setPadLocked` the pad's lock dot does, so the two cannot disagree. `flick`
 (`--es arg on|off`, no arg = read it back) is the second non-display op: it switches the
 edge strips between live scrolling and Lite's bank-and-scroll-on-release feel, through the
-same `setFlickScroll` the CONTROLS row uses. `tasks` (no arg) lists
+same `setFlickScroll` the CONTROLS row uses. `marks` (`--es arg on|off`) is its cosmetic
+twin: whether the pad draws the dotted edge-strip markers, through the same
+`setShowScrollMarks` the CONTROLS row uses. `tasks` (no arg) lists
 the floating ("pop-up view") windows on the display the panels live on, and with
 `--es arg show|hide|toggle` drives the panel that lists them; `taskfocus --es arg <TASK_ID>`
 brings one to the front. `tasks` replies `ok tasks n=<count> display=<d>` followed by
@@ -157,7 +159,8 @@ pixels to composite, so it fails cleanly.
   manifest-declared receiver on API 26+, and the failure is silent (result=0 with no
   `data=`), which is easy to misread as success.
 - `status` replies with `shizuku=ready id=N kind=floating|headless|none window=shown|hidden
-  surface=alive|detached vsize=WxH target=N padlocked=true|false flick=on|off keys=default|custom`;
+  surface=alive|detached vsize=WxH target=N padlocked=true|false flick=on|off marks=on|off
+  keys=default|custom`;
   scripts parse that line.
 - `create` is asynchronous — the floating display is built from the SurfaceView's
   surface callback, so poll `status` until `kind=floating`.
@@ -455,6 +458,14 @@ this list honest — do not move rows up without actually re-testing.
   wheel deltas per-app). On the surface display the flick is now Lite's own mechanism -
   one 260ms stroke of the banked distance, gain back at Lite's 2.0 - and the wheel
   glide (FLICK_STEP 20/40ms) survives only for retargeted displays a stroke cannot reach.
+- **Scroll marks**: `vdisplay marks on|off` round-trips (and no-arg reads), `status`
+  reports `marks=`, and the CONTROLS row draws/clears the dotted markers on the pad's
+  sides via the same `setShowScrollMarks` - a column of small dots at the strip centres
+  (`dp(EDGE_SCROLL_DP)/2` in from each edge, `dp(1.4)` radius every `dp(12)`, starting
+  `dp(40)` down so they clear the docked control dots), drawn as circles by the
+  `PadSurface` view in a new `Theme.scrollMark` role, no theme rebuild on toggle. The
+  render itself is confirmed only by the op round-trip; it has not been eyeballed on
+  the device.
 - **Auto-rebind after the shell service dies**: killing the shell process logs
   `shell service disconnected` → `rebinding shell service (attempt 1)` →
   `shell service bound` about 1.8s later, with no accessibility-service restart. The

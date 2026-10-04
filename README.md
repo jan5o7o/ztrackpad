@@ -47,8 +47,9 @@ Three floating dots, and five controls docked inside the pad:
   the pad around.
 - **CONTROLS** (the gear) holds what is a setting rather than a control: whether the keys panel
   shows the **full keyboard** or your own **favorite shortcuts**, whether each optional dot
-  exists at all, whether the edge strips **scroll live or flick on release** (below), and two
-  links — the keys guide below, and the issue tracker. The pad's own dot
+  exists at all, whether the edge strips **scroll live or flick on release**, whether they draw
+  their **dotted scroll marks** (below), and two links — the keys guide below, and the issue
+  tracker. The pad's own dot
   has no switch, deliberately: it is the only way to show the pad and it carries the gear, so
   hiding it would strand the way back.
 
@@ -401,7 +402,8 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
   gear dot switches the panel between the built-in keyboard and your own spec.
 - **A CONTROLS panel in the pad** (the gear dot, outermost on the right): the keys choice above,
   on/off switches for the `⌨` and `▤` dots, a **Flick to scroll** switch that trades the
-  strips' live scroll for Lite's bank-on-release feel, and links to the keys guide and the
+  strips' live scroll for Lite's bank-on-release feel, a **Show scroll marks** switch for the
+  dotted strip markers, and links to the keys guide and the
   issue tracker.
   The pad's own dot has no switch — it is the only way to show the pad, and it carries the gear.
 - Sticky `CTRL/ALT/SHIFT` modifiers, **hold-to-auto-repeat** on all keys
@@ -592,11 +594,11 @@ adb shell am broadcast -n app.so7o.ztrackpad/.VDisplayReceiver \
 
 Ops: `status` | `create` [headless] [`--w W --h H`] | `show` | `hide` | `destroy` | `launch
 <package-or-component>` [url] | `target [display-id|package]` | `shot [--name]` | `lock on|off|toggle` |
-`flick on|off` |
+`flick on|off` | `marks on|off` |
 `keys [<spec>]` | `keys-reset`.
 The reply arrives as
 `Broadcast completed: result=0, data="shizuku=ready id=25 kind=floating window=shown
-surface=alive vsize=1245x1397 target=0 padlocked=false flick=off keys=default"`.
+surface=alive vsize=1245x1397 target=0 padlocked=false flick=off marks=on keys=default"`.
 
 - **The `-n` component is required.** An implicit broadcast does not reach a
   manifest-declared receiver on API 26+, so `-a` alone silently does nothing.
@@ -616,6 +618,9 @@ surface=alive vsize=1245x1397 target=0 padlocked=false flick=off keys=default"`.
   scrolling live and Lite's feel — banking the whole gesture and scrolling once, on
   release. Same setter as the CONTROLS row, so they cannot disagree; `status` reports
   `flick=on|off`.
+- **`marks on|off`** switches the pad's dotted edge-strip markers — the laptop-trackpad
+  affordance that says where scrolling lives. Cosmetic, so it only redraws the pad; same
+  setter as the CONTROLS row; `status` reports `marks=on|off`.
 - **`launch` puts an app on the display** through the same Shizuku shell bridge the
   display was created with, so it works for headless displays too: `vdisplay launch
   com.android.settings`, or `vdisplay launch com.android.chrome --url '…'`.

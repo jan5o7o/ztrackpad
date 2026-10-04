@@ -221,6 +221,9 @@ public class TrackpadService extends AccessibilityService {
     /** Pref: edge-strip scrolls bank the gesture and spend it on release - see flickScroll. */
     private static final String PREF_FLICK_SCROLL = "flickScroll";
 
+    /** Pref: the pad draws dotted markers where the edge scroll strips are. */
+    private static final String PREF_SHOW_SCROLL_MARKS = "showScrollMarks";
+
     /** Opacity slider range, in percent. */
     private static final int OPACITY_MIN = 20;
     private static final int OPACITY_MAX = 100;
@@ -265,6 +268,8 @@ public class TrackpadService extends AccessibilityService {
     private float density = 3f;
 
     private View bubble, keysBubble, pad, keysPanel, pickerPanel;
+    /** The pad's touch surface: draws the edge-strip dotted markers (showScrollMarks). */
+    private PadSurface padSurface;
     private LinearLayout pickerRows;
     private TextView virtualRow;
     private TextView screenRow;
@@ -342,6 +347,8 @@ public class TrackpadService extends AccessibilityService {
      * ("flick to scroll"). False = the default live throttled scroll. See PREF_FLICK_SCROLL.
      */
     private boolean flickScroll = false;
+    /** True = dotted markers on the pad's sides show where the edge scroll strips are. */
+    private boolean showScrollMarks = true;
     /** The list as last rendered, so a tap can act on rows it did not have to re-read. */
     private List<TaskRow> lastRows;
     /**
@@ -433,6 +440,7 @@ public class TrackpadService extends AccessibilityService {
         showKeysBubble = prefs.getBoolean(PREF_SHOW_KEYS_BUBBLE, true);
         showTasksBubble = prefs.getBoolean(PREF_SHOW_TASKS_BUBBLE, true);
         flickScroll = prefs.getBoolean(PREF_FLICK_SCROLL, false);
+        showScrollMarks = prefs.getBoolean(PREF_SHOW_SCROLL_MARKS, true);
         padLocked = prefs.getBoolean(PREF_LOCK, false);
 
         cursorX = outW / 2f;
@@ -1658,7 +1666,7 @@ public class TrackpadService extends AccessibilityService {
             else return "error: controls wants show|hide|toggle";
             return "ok controls " + (controlsVisible ? "shown" : "hidden") + " keys-mode=" + keysMode
                     + " bubbles=keys:" + onOff(showKeysBubble) + ",tasks:" + onOff(showTasksBubble)
-                    + " flick=" + onOff(flickScroll);
+                    + " flick=" + onOff(flickScroll) + " marks=" + onOff(showScrollMarks);
         }
 
         // The edge strips' scroll feel, mirroring the CONTROLS row - same setter, so a
@@ -1671,6 +1679,17 @@ public class TrackpadService extends AccessibilityService {
             }
             setFlickScroll("on".equals(what));
             return "ok flick " + onOff(flickScroll);
+        }
+
+        // Whether the pad draws the edge-strip dotted markers, mirroring the CONTROLS row.
+        if ("marks".equals(op)) {
+            String what = (arg == null) ? "" : arg.trim();
+            if (what.length() == 0) return "ok marks " + onOff(showScrollMarks);
+            if (!"on".equals(what) && !"off".equals(what)) {
+                return "error: marks wants on|off, not '" + what + "'";
+            }
+            setShowScrollMarks("on".equals(what));
+            return "ok marks " + onOff(showScrollMarks);
         }
 
         // Which layout the keys panel shows, and which of the optional dots exist. Both
@@ -1880,7 +1899,7 @@ public class TrackpadService extends AccessibilityService {
         }
 
         return "error: unknown op '" + op + "' (status|create|destroy|show|hide|lock|keys"
-                + "|keys-reset|keys-mode|flick|bubbles|controls|tasks|taskfocus|launch|target|shot)";
+                + "|keys-reset|keys-mode|flick|marks|bubbles|controls|tasks|taskfocus|launch|target|shot)";
     }
 
     /**
@@ -2027,6 +2046,7 @@ public class TrackpadService extends AccessibilityService {
                 + " target=" + targetDisplayId
                 + " padlocked=" + padLocked
                 + " flick=" + onOff(flickScroll)
+                + " marks=" + onOff(showScrollMarks)
                 + " keys=" + ((keysSpec == null || keysSpec.length() == 0) ? "default" : "custom");
     }
 
@@ -2595,14 +2615,8 @@ public class TrackpadService extends AccessibilityService {
         });
 
         // --- touch surface ------------------------------------------------
-        View surface = new View(this);
-        GradientDrawable sbg = new GradientDrawable();
-        sbg.setColor(fill(theme.panelBody));
-        surface.setBackground(sbg);
-        LinearLayout.LayoutParams sp =
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        surface.setLayoutParams(sp);
-        surface.setOnTouchListener(new PadTouch());
+        padSurface = new PadSurface();
+        padSurface.setOnTouchListener(new PadTouch());
 
         // --- button row ---------------------------------------------------
         LinearLayout bar = new LinearLayout(this);
@@ -2641,7 +2655,8 @@ public class TrackpadService extends AccessibilityService {
 
         content.addView(handle, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(34)));
-        content.addView(surface);
+        content.addView(padSurface, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         content.addView(keys, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
         content.addView(bar, new LinearLayout.LayoutParams(
@@ -3983,6 +3998,46 @@ public class TrackpadService extends AccessibilityService {
     // Trackpad touch handling
     // =========================================================================
 
+    /**
+     * The pad's touch surface: the themed body plus, when showScrollMarks is on, a column
+     * of dots down the middle of each edge-scroll strip - the laptop-trackpad affordance
+     * that says "drag here to scroll". The strips are EDGE_SCROLL_DP wide, so each column
+     * sits dp(EDGE_SCROLL_DP)/2 in from its edge, with an end margin so it does not crowd
+     * the corner grips. Dots on purpose, not dashes: a dashed line reads as a divider,
+     * and a dotted one as "use this edge".
+     */
+    private class PadSurface extends View {
+        private final Paint mark = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        PadSurface() {
+            super(TrackpadService.this);
+            GradientDrawable sbg = new GradientDrawable();
+            sbg.setColor(fill(theme.panelBody));
+            setBackground(sbg);
+            mark.setColor(theme.scrollMark);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            super.onDraw(c);
+            if (!showScrollMarks) return;
+            float x = dp(EDGE_SCROLL_DP) / 2f;
+            float r = dp(1.4f);
+            float pitch = dp(12f);
+            // The docked control dots (theme/lock on the left, gear/display on the right)
+            // sit just under the handle, dp(8) down from the surface's top and dp(26) tall.
+            // The columns have to start below them, or the first dots run behind the
+            // buttons: dp(8) + dp(26) + a dp(6) gap = dp(40).
+            float y = dp(40f);
+            float bottom = getHeight() - dp(12f);
+            while (y <= bottom) {
+                c.drawCircle(x, y, r, mark);
+                c.drawCircle(getWidth() - x, y, r, mark);
+                y += pitch;
+            }
+        }
+    }
+
     private class PadTouch implements View.OnTouchListener {
 
         private float centroidX(MotionEvent e) {
@@ -4886,6 +4941,9 @@ public class TrackpadService extends AccessibilityService {
         controlsRows.addView(controlRow("Flick to scroll", flickScroll, new View.OnClickListener() {
             @Override public void onClick(View v) { tick(); setFlickScroll(!flickScroll); }
         }));
+        controlsRows.addView(controlRow("Show scroll marks", showScrollMarks, new View.OnClickListener() {
+            @Override public void onClick(View v) { tick(); setShowScrollMarks(!showScrollMarks); }
+        }));
 
         // no section label here: the arrow rows read as links, and it is the difference
         // between the panel fitting its content and clipping the last row
@@ -4983,6 +5041,21 @@ public class TrackpadService extends AccessibilityService {
         prefs.edit().putBoolean(PREF_FLICK_SCROLL, on).apply();
         refreshControlsRows();
         Log.i(TAG, "flick to scroll -> " + (on ? "on" : "off"));
+    }
+
+    /**
+     * Whether the pad draws dotted lines marking its edge-scroll strips.
+     *
+     * Cosmetic, so unlike the behavior toggles this only redraws the surface - no theme
+     * rebuild, no geometry churn. Shared by the CONTROLS row and the `marks` op, so a
+     * script and a finger cannot disagree.
+     */
+    private void setShowScrollMarks(boolean on) {
+        showScrollMarks = on;
+        prefs.edit().putBoolean(PREF_SHOW_SCROLL_MARKS, on).apply();
+        if (padSurface != null) padSurface.invalidate();
+        refreshControlsRows();
+        Log.i(TAG, "scroll marks -> " + (on ? "on" : "off"));
     }
 
     /**
