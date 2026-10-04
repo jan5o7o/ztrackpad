@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# vdisplay - create/show/hide/destroy ztrackpad's virtual display from a script.
+# vdisplay - create/show/hide/destroy ztrackpad's virtual display from a script,
+# launch apps on it, point the pad's input at it, and capture its pixels.
 #
 #   vdisplay status
-#   vdisplay create [--headless]
+#   vdisplay create [--headless] [--w W --h H]
 #   vdisplay show
 #   vdisplay hide
 #   vdisplay destroy
+#   vdisplay launch <package-or-component> [--url URL]
+#   vdisplay target [<display-id>|<package>]   # no arg = read the target back
+#   vdisplay shot [--name NAME]                # -> /data/local/tmp/<NAME>.png
 #   vdisplay keys                 # print the current key layout spec
 #   vdisplay keys '<spec>'        # set a custom key layout
 #   vdisplay keys-reset           # back to the built-in layout
@@ -16,7 +20,7 @@
 # over a broadcast. Needs an adb connection to the device, because sending a broadcast
 # requires shell - a phone-side shell (Termux) has no `am` of its own.
 #
-# Prints ztrackpad's one-line status reply, and exits non-zero on an error.
+# Prints ztrackpad's one-line reply, and exits non-zero on an error.
 set -euo pipefail
 
 PKG=app.so7o.ztrackpad
@@ -30,7 +34,8 @@ ADB="${VDISPLAY_ADB:-adb}"
 # a shell on the device. So a spec containing '|' or ';' is parsed as shell syntax - a row
 # separator became a pipe and the rest of the layout vanished into
 # "/system/bin/sh: ...: inaccessible or not found". The embedded '\'' is the standard
-# POSIX way to put a single quote inside a single-quoted string.
+# POSIX way to put a single quote inside a single-quoted string. The app re-quotes what it
+# passes down to its own shell bridge, so the two layers never see each other's quotes.
 sq() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
@@ -48,37 +53,57 @@ esac
 op=${1:-status}
 shift || true
 
-# `keys` takes an optional positional spec. Pick it up BEFORE the option loop, or a spec
-# full of ':' and ';' reads as an unknown flag.
+# `keys` takes an optional positional spec; `lock`, `launch` and `target` an optional
+# positional value. Pick these up BEFORE the option loop, or a value full of ':' and ';'
+# reads as an unknown flag.
 spec=""
 arg=""
 if [ "$op" = "keys" ] && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
     spec="$1"
     shift
 fi
-if [ "$op" = "lock" ] && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
+if { [ "$op" = "lock" ] || [ "$op" = "launch" ] || [ "$op" = "target" ]; } \
+        && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
     arg="$1"
     shift
 fi
 
 headless=false
-for a in "$@"; do
+wopt=""
+hopt=""
+url=""
+name=""
+i=1
+rest=("$@")
+n=${#rest[@]}
+while [ $i -le "$n" ]; do
+    a=${rest[$((i - 1))]}
     case "$a" in
-        --headless|-H) headless=true ;;
+        --headless|-H) headless=true; i=$((i + 1)) ;;
+        --w) wopt=${rest[$i]:-}; i=$((i + 2)) ;;
+        --h) hopt=${rest[$i]:-}; i=$((i + 2)) ;;
+        --url) url=${rest[$i]:-}; i=$((i + 2)) ;;
+        --name) name=${rest[$i]:-}; i=$((i + 2)) ;;
         -h|--help|help) usage 0 ;;
         *) echo "vdisplay: unknown option '$a'" >&2; usage 1 ;;
     esac
 done
 
 case "$op" in
-    status|create|show|hide|destroy|keys|keys-reset|lock) ;;
+    status|create|show|hide|destroy|keys|keys-reset|lock|launch|target|shot) ;;
     *) echo "vdisplay: unknown op '$op'" >&2; usage 1 ;;
 esac
+
+# `shot` takes its file name from --name.
+[ "$op" = "shot" ] && [ -n "$name" ] && arg="$name"
 
 args=(-n "$RECEIVER" -a "$ACTION" --es op "$op")
 [ "$headless" = true ] && args+=(--ez headless true)
 [ -n "$spec" ] && args+=(--es spec "$(sq "$spec")")
-[ -n "$arg" ] && args+=(--es arg "$arg")
+[ -n "$arg" ] && args+=(--es arg "$(sq "$arg")")
+[ -n "$url" ] && args+=(--es url "$(sq "$url")")
+[ -n "$wopt" ] && args+=(--ei w "$wopt")
+[ -n "$hopt" ] && args+=(--ei h "$hopt")
 
 if ! out=$("$ADB" shell am broadcast "${args[@]}" 2>&1); then
     echo "vdisplay: adb failed - is the device connected?" >&2

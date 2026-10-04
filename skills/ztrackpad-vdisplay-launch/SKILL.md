@@ -69,45 +69,67 @@ display, then read `status` over adb once the connection is back.
 
 ## 3. Launch an app on it
 
+The display's own launch op goes through ztrackpad's Shizuku shell bridge, so it works
+for headless displays too (`am start --display` from adb can be refused for those):
+
+```bash
+cd ~/ztrackpad/skills/ztrackpad-vdisplay && ./scripts/vdisplay launch com.android.chrome --url 'https://www.youtube.com/'
+# or, for an app that is not URL-driven:
+./scripts/vdisplay launch com.android.settings
+```
+
+A bare package name is resolved by `am`; `pkg/.Activity` names an explicit component.
+The reply is `ok launch display=<id> target=<pkg> …` — the display id must match the
+`id` from step 2's `status`.
+
+The adb fallback still exists if the broadcast route is down, with its limits:
+
 ```bash
 adb shell am start --display <id> -f 0x10000000 \
     -n com.android.chrome/com.google.android.apps.chrome.Main \
     -a android.intent.action.VIEW -d 'https://www.youtube.com'
 ```
 
-- `--display` needs shell, so this step is adb-only. Termux's `am` prints its usage and exits if
-  handed `--display`, and the app's own receiver has no launch op, so there is no third route.
-- If the app is already running, the start can be **delivered to the running instance** instead of
-  creating one on the display: the answer is then `Activity not started, intent has been delivered
-  to currently running top-most instance`. That is not necessarily a failure — check where the task
-  landed (step 4) before force-stopping anything.
+- If the app is already running, the start can be **delivered to the running instance**
+  instead of creating one on the display: the answer is then `Activity not started,
+  intent has been delivered to currently running top-most instance`. That is not
+  necessarily a failure — check where the task landed (step 4) before force-stopping
+  anything.
+- To drive the app with the pad afterwards: `vdisplay target <id>` (or `vdisplay
+  target <pkg>` to name it by package).
 
-## 4. Verify from pixels, or from the task list
+## 4. Verify from the display's own pixels, or from the task list
 
-The floating display renders into a window on the phone's screen, so an ordinary capture shows it:
+The composite of the phone screen shows the floating window plus every overlay on it;
+`shot` captures the display's pixels directly instead:
 
 ```bash
-adb shell screencap -p /data/local/tmp/s.png && adb pull /data/local/tmp/s.png ~/vd.png
+cd ~/ztrackpad/skills/ztrackpad-vdisplay && ./scripts/vdisplay shot --name app-state
+adb pull /data/local/tmp/app-state.png ~/vd.png
+```
+
+Read the PNG; do not trust the verb. Only a **floating** display has pixels to capture;
+`shot` on a headless display fails cleanly (`error: shot: could not capture`). For a
+floating display the same check can also come from the task list:
+
+```bash
 adb shell dumpsys activity activities | grep -A 6 "Display #<id>"
 ```
 
-Read the PNG; do not trust the verb. `screencap` warns about multiple displays and picks one
-itself — `-d` wants a SurfaceFlinger token from `dumpsys SurfaceFlinger --display-id`, not an
-Android display id.
-
-`logcat` is **not** a result channel here: Termux sees only its own UID's logs, so the app's lines
-never appear in it.
+`logcat` is **not** a result channel here: Termux sees only its own UID's logs, so the
+app's lines never appear in it.
 
 ## Traps
 
-- **`target=0` in `status`** means the pad still drives the phone display. Hand the pad the display
-  with the ▣ picker before injecting input at it — there is no scriptable set-target.
-- **Headless (`create --headless`) cannot be verified or driven:** no surface, no pixels, every
-  capture route times out. Keep it for work that needs no screen.
+- **`target=<id>` in `status`** is whatever the trackpad drives. Point the pad at the
+  display before injecting input at it: `vdisplay target <id>` — or `vdisplay target
+  <pkg>` to name it by package.
+- **Headless (`create --headless`) cannot be driven or verified:** no surface, no
+  pixels, and `shot` fails cleanly on it. Keep it for work that needs no screen.
 - **`hide` is not `destroy`** — hiding keeps the display and its apps running, so `show` brings the
   same `id` back.
-- **A phone-display `screencap` is not the page's own pixels.** For HTML inside a WebView, capture
-  over CDP instead: `~/android-webview-cdp/cdp.mjs --shot`.
+- A phone-display `screencap` is **not** the page's own pixels. For HTML inside a WebView,
+  capture over CDP instead: `~/android-webview-cdp/cdp.mjs --shot`.
 
 ## Checklist
 
@@ -115,6 +137,7 @@ never appear in it.
 |---|---|---|
 | adb | `adb devices -l` | `device`, not `offline` |
 | display | `scripts/vdisplay status` | `kind=floating surface=alive`, note the `id` |
-| launch | `am start --display <id> …` | created a task, *or* delivered to a running instance |
+| launch | `vdisplay launch <pkg> [--url]` | `ok launch display=<id> target=<pkg>` |
 | placed | `dumpsys activity activities \| grep -A 6 "Display #<id>"` | the app's task is on that display |
-| visible | `screencap` + read the PNG | the app's content in the top-half window |
+| target | `vdisplay target <id>` | the display the trackpad drives |
+| visible | `vdisplay shot --name v` + `adb pull` + read the PNG | the app's content, without the phone composite |

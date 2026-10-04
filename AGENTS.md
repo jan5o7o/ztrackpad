@@ -105,15 +105,16 @@ only the client's hardcoded `0`s.
 ## Scripting the virtual display
 
 `VDisplayReceiver` (exported, action `app.so7o.ztrackpad.VDISPLAY`) forwards to
-`TrackpadService.vdisplayCommand(op, headless, spec, arg)`, which does the real work on the
-main thread. Scripts go through it; `skills/ztrackpad-vdisplay/scripts/vdisplay` is the reference
-implementation, and `extensions/vdisplay.ts` wraps it for pi.
+`TrackpadService.vdisplayCommand(op, headless, spec, arg, w, h, url)`, which does the real work
+on the main thread. Scripts go through it; `skills/ztrackpad-vdisplay/scripts/vdisplay` is the
+reference implementation, and `extensions/vdisplay.ts` wraps it for pi.
 
 ```bash
 adb shell am broadcast -n app.so7o.ztrackpad/.VDisplayReceiver -a app.so7o.ztrackpad.VDISPLAY --es op status
 ```
 
-Ops: `status`, `create` (+`--ez headless true`), `show`, `hide`, `destroy`, `keys`
+Ops: `status`, `create` (+`--ez headless true`, + `--ei w W --ei h H` for a requested
+size), `show`, `hide`, `destroy`, `keys`
 (`--es spec '<layout>'`, no spec = read it back), `keys-reset`, and `lock`
 (`--es arg on|off|toggle`) - the lock is the one non-display op, and it drives the same
 `setPadLocked` the pad's lock dot does, so the two cannot disagree. `tasks` (no arg) lists
@@ -125,6 +126,18 @@ brings one to the front. `tasks` replies `ok tasks n=<count> display=<d>` follow
 the CONTROLS panel's rows - same setters, so a finger and a script cannot disagree - and
 `controls --es arg show|hide|toggle` is that panel. `split --es arg up|down` is the old pad
 button, dropped from the UI for the scroll strip it sat on.
+
+The headless-testing ops are the reason this receiver exists for agents: `launch`
+(`--es arg <package-or-component>`, + `--es url <uri>` for a VIEW data) starts an app on
+`ownVirtualDisplayId` from inside the Shizuku shell process - the same route `seedVirtualDisplay`
+uses - because a plain `am start --display` from adb can be refused for displays like ours and
+the shell both owns the display and holds `INTERNAL_SYSTEM_WINDOW`, which
+`ActivityTaskSupervisor.isCallerAllowedToLaunchOnDisplay` (AOSP 16) checks first.
+`target --es arg <id|package>` moves the pad's input target through `setTargetDisplay` - the
+picker's exact code path - and with no arg reads it back. `shot --es arg <name>` runs
+`screencap -d` inside the shell process at the SurfaceFlinger value for the ztrackpad display
+and verifies the PNG really exists (`/data/local/tmp/<name>.png`); a headless display has no
+pixels to composite, so it fails cleanly.
 
 - **The pad's own dot has no on/off pref, deliberately.** It is the only way to show the pad
   (which has no close button) and it carries the gear, so hiding it would strand the way back
@@ -501,6 +514,14 @@ this list honest — do not move rows up without actually re-testing.
   service rebinds correctly (verified), but `OnBinderReceivedListener` needs Shizuku
   itself to stop and start - which takes the Shizuku app or a fresh adb start, and would
   disturb whatever else is using it. Treat that path as written-but-untested.
+- **The testing ops — `launch`, `target`, `shot`, and `create --w/--h` — are
+  build-verified only, not run on device.** The branch landed with the operator's live
+  session and a concurrent display test running, so no display could be created or
+  destroyed and nothing was installed. The launch mechanism is the same shell bridge
+  the seed already uses (verified in AGENTS above), but a headless `shot` may fail on
+  some builds, and the floating-window resize path has not been exercised. Run
+  `tests/smoke.sh` (its new fail-closed checks run without a display) after the next
+  install to see real replies.
 - No `✕` on the trackpad (pre-existing), so the pad can only be dismissed from the
   `●` bubble. Removed deliberately on request; re-add in one line if missed.
 
