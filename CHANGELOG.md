@@ -9,6 +9,11 @@ it can only ever describe the app as shipped.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.7.0 — 2026-10-04
+
+
 ### Features
 
 - **Flick to scroll** (CONTROLS > SCROLLING): the pad's edge strips normally scroll
