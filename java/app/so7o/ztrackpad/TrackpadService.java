@@ -125,10 +125,11 @@ public class TrackpadService extends AccessibilityService {
      * slow to react, then a single flick.
      *
      * This is the flick's gain: banked distance per px of finger travel, spent at once.
-     * It is a plain ratio in the same way Lite's was (2.0 there measured 2:1 and felt
-     * right, so it is 2.0 here too).
+     * Lite's ratio was 2.0 - there it measured 2:1 and felt right - but a wheel unit on
+     * this build moves about as far as a stroke pixel did there, and 2.0 landed too big a
+     * jump on release. 1.0 is a plain 1:1: the page moves as far as the finger, in one go.
      */
-    private static final float EDGE_FLICK_GAIN = 2.0f;
+    private static final float EDGE_FLICK_GAIN = 1.0f;
     /** Ceiling on one flick, as a fraction of the screen height - a long fling stays a fling. */
     private static final float SCROLL_CAP_SCREEN = 0.6f;
     /**
