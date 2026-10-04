@@ -9,12 +9,38 @@ it can only ever describe the app as shipped.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.7.0 — 2026-10-04
+
+
+### Features
+
+- **Flick to scroll** (CONTROLS > SCROLLING): the pad's edge strips normally scroll
+  live while your finger moves. Flip this on and they bank the whole gesture and
+  spend it as one smooth motion on release, the feel of So7o Z Trackpad Lite, ported as an
+  option. Also scriptable: `vdisplay flick on|off`, and `status` reports `flick=`.
+- **Scroll marks** (CONTROLS > SCROLLING): dotted lines down the pad's sides mark where
+  the edge-scroll strips are, like a laptop trackpad. On by default; `vdisplay marks
+  on|off` scripts it, and `status` reports `marks=`.
+- **First-run launcher**: the Open Accessibility Settings button is the first thing
+  under the title (it used to sit below the whole guide), and the top padding follows
+  the real status-bar inset so Android 15+'s edge-to-edge drawing no longer cuts it off.
+- The pad's bottom buttons gain hairline seams between them, and the action bar floats
+  off the pad's bottom edge.
+
 ### Bugfixes
 
 - `scripts/vdisplay tap` now consumes **both** coordinates (`tap <x> <y>`) instead of
   dropping the second one and sending x alone. This matches the contract 0.6.0
   documented and what `scripts/vdisplay-test` actually calls (`tap 500 300`), so the
   driving test's taps now land where they say. `type` and `press` were already correct.
+
+### Extension
+
+- The `vdisplay` pi extension now also exposes `tap <x> <y>`, `type <text>` and
+  `press <KEYCODE>`, so an agent can drive the app on a display straight from pi
+  instead of hand-rolling `adb shell input -d <id>` (display-routed either way).
 
 ## 0.6.0 — 2026-10-04
 

@@ -59,6 +59,7 @@ final class Theme {
     int padStroke;
     int screenHead;       // floating-display title bar
     int grip;             // resize grips
+    int scrollMark;       // dotted markers where the pad's edge scroll strips are
 
     // keys
     int keyBg;            // resting key fill
@@ -117,6 +118,7 @@ final class Theme {
         DEFAULT.padStroke = 0x66FFFFFF;
         DEFAULT.screenHead = 0x66000000;
         DEFAULT.grip = 0x77FFFFFF;
+        DEFAULT.scrollMark = 0x88FFFFFF;
         DEFAULT.keyBg = 0x22FFFFFF;
         DEFAULT.keyStroke = 0x55FFFFFF;
         DEFAULT.keyStrokePressed = 0xCCFFFFFF;
@@ -155,6 +157,7 @@ final class Theme {
         DARK.padStroke = 0x40FFFFFF;
         DARK.screenHead = 0xFF1C1C22;
         DARK.grip = 0x88FFFFFF;
+        DARK.scrollMark = 0x66FFFFFF;
         DARK.keyBg = 0xFF1B1B22;
         DARK.keyStroke = 0x33FFFFFF;
         DARK.keyStrokePressed = 0x99FFFFFF;
@@ -193,6 +196,7 @@ final class Theme {
         LIGHT.padStroke = 0x33000000;
         LIGHT.screenHead = 0xFFE4E4EA;
         LIGHT.grip = 0x66000000;
+        LIGHT.scrollMark = 0x8A101014;
         LIGHT.keyBg = 0xFFFFFFFF;
         LIGHT.keyStroke = 0x22000000;
         LIGHT.keyStrokePressed = 0x88000000;
@@ -232,6 +236,7 @@ final class Theme {
         CONTRAST.padStroke = 0xFFFFFFFF;
         CONTRAST.screenHead = 0xFF141414;
         CONTRAST.grip = 0xFFFFFFFF;
+        CONTRAST.scrollMark = 0xFFFFFFFF;
         CONTRAST.keyBg = 0xFF141414;
         CONTRAST.keyStroke = 0x80FFFFFF;
         CONTRAST.keyStrokePressed = 0xFFFFFFFF;
@@ -270,6 +275,7 @@ final class Theme {
         GLASS.padStroke = 0x26FFFFFF;
         GLASS.screenHead = 0x14000000;
         GLASS.grip = 0x33FFFFFF;
+        GLASS.scrollMark = 0x59FFFFFF;
         GLASS.keyBg = 0x14FFFFFF;
         GLASS.keyStroke = 0x1FFFFFFF;
         GLASS.keyStrokePressed = 0x80FFFFFF;
