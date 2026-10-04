@@ -22,7 +22,18 @@ public class MainActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(48, 96, 48, 48);
+        // The top margin has to clear the status bar, which is tall on the cover screen
+        // (punch-hole area) and in DeX. Android 15+ draws activities edge-to-edge by
+        // default, so a fixed padding is not enough - ask for the bar's real height and
+        // seat the button below it. The fixed 96px left the button half cut off by the
+        // header on a fresh install.
+        int statusBar = 0;
+        int sbRes = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        if (sbRes > 0) {
+            try { statusBar = getResources().getDimensionPixelSize(sbRes); } catch (Exception ignored) {}
+        }
+        int top = statusBar + 96;
+        root.setPadding(48, top, 48, 48);
         root.setBackgroundColor(Color.parseColor("#101014"));
 
         TextView title = new TextView(this);

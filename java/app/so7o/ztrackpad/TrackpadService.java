@@ -4027,8 +4027,10 @@ public class TrackpadService extends AccessibilityService {
             // The docked control dots (theme/lock on the left, gear/display on the right)
             // sit just under the handle, dp(8) down from the surface's top and dp(26) tall.
             // The columns have to start below them, or the first dots run behind the
-            // buttons: dp(8) + dp(26) + a dp(6) gap = dp(40).
-            float y = dp(40f);
+            // buttons, and two dots are dropped from the top of each column on purpose:
+            // dp(8) + dp(26) + dp(6) + two dp(12) pitches = dp(64), so what remains is
+            // clearly clear of the buttons rather than brushing past them.
+            float y = dp(64f);
             float bottom = getHeight() - dp(12f);
             while (y <= bottom) {
                 c.drawCircle(x, y, r, mark);

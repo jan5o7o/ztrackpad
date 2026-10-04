@@ -462,7 +462,8 @@ this list honest — do not move rows up without actually re-testing.
   reports `marks=`, and the CONTROLS row draws/clears the dotted markers on the pad's
   sides via the same `setShowScrollMarks` - a column of small dots at the strip centres
   (`dp(EDGE_SCROLL_DP)/2` in from each edge, `dp(1.4)` radius every `dp(12)`, starting
-  `dp(40)` down so they clear the docked control dots), drawn as circles by the
+  `dp(64)` down - two dots dropped from the top so the columns clear the docked control
+  dots with room to spare), drawn as circles by the
   `PadSurface` view in a new `Theme.scrollMark` role, no theme rebuild on toggle. The
   render itself is confirmed only by the op round-trip; it has not been eyeballed on
   the device.
