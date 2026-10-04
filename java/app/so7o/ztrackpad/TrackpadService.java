@@ -2998,8 +2998,11 @@ public class TrackpadService extends AccessibilityService {
         t.setGravity(Gravity.CENTER);
         t.setBackground(keyBgState(0x00000000, theme.accent));
         t.setClickable(true);
-        t.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        // dp(1) hairline between the pad's bottom buttons, the same seam makeButton adds.
+        LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+        lp.rightMargin = dp(1);
+        t.setLayoutParams(lp);
         attachRepeat(t, action, true);
         return t;
     }
@@ -3538,8 +3541,13 @@ public class TrackpadService extends AccessibilityService {
         t.setTextSize(17f);
         t.setGravity(Gravity.CENTER);
         t.setBackground(keyBgState(0x00000000, theme.accent));
-        t.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        // dp(1) hairline between the pad's bottom buttons - they were packed flush, and
+        // a 1px seam is what separates a row of buttons from a single blob. The row's
+        // own side padding swallows the outer margin, so only the seams show.
+        LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+        lp.rightMargin = dp(1);
+        t.setLayoutParams(lp);
         t.setPadding(dp(4), 0, dp(4), 0);
         t.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { tick(); action.run(); }
