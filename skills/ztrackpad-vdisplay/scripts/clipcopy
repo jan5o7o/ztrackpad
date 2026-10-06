@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# clipcopy - put text on the clipboard AND tell ztrackpad about it.
+#
+#   clipcopy "some text"
+#   printf '%s' "$junk" | clipcopy        # no arguments reads stdin
+#
+# Why a helper exists at all: ztrackpad cannot detect a copy from the background (four routes
+# measured negative - see the clipboard section in AGENTS.md), so the dot that offers to clean
+# the clipboard only knows a copy happened if something tells it. This is that something.
+#
+# The write goes through ztrackpad (`clip-set`, and writing the clipboard needs no focus), then
+# a ping raises the dot and starts its auto-hide clock. With `vdisplay clip auto-hide on` the
+# dot then disappears on its own `clip hide-after` minutes later.
+#
+# The broadcast needs an adb connection, because sending one needs shell - a phone-side shell
+# (Termux) has no `am` of its own. With no adb, use `vdisplay clip-set` alone: the clipboard
+# still gets the text, the dot just does not hear about it.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ "$#" -gt 0 ]; then
+    text="$*"
+else
+    text="$(cat)"
+fi
+
+"$DIR/vdisplay" clip-set "$text" >/dev/null
+"$DIR/vdisplay" clip ping

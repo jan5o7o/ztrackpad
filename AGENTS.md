@@ -346,9 +346,17 @@ pixels to composite, so it fails cleanly.
      Probed by reflection; `framework.jar` carries the class, so no SDK jar is needed.
 
   A dot that "appears on copy" therefore needs a signal from outside: any app or script can
-  poke the exported receiver (`--es op clip --es arg show`, which also marks the dot ready), and
-  a dedicated no-UI `ping` op would be a two-line addition to `vdisplayCommand`. That is the
-  only real copy trigger available.
+  poke the exported receiver (`--es op clip --es arg ping`, which shows the dot and arms its
+  clock). That is the only real copy trigger available, and `scripts/clipcopy` is it in one
+  step - it writes the clipboard through ztrackpad and pings.
+- **Auto-hide is off by default, and the ping is what opens the window.** `clipAutoHide` +
+  `clipHideMinutes` (default 2) drive a single `postDelayed` (`clipHideTask`); the dot is on
+  when `showClipBubble && (!clipAutoHide || clipReady)`, so `clipReady` is now "inside the
+  active window" rather than the old "a delivery was ever seen". A ping, a modal open, and a
+  focused clipboard change all open the window; the task refuses to run while the modal is
+  open, and closing the modal re-arms it. Two footguns are handled deliberately: switching
+  auto-hide on opens the window immediately, and a service start with auto-hide on starts in
+  the window - either way a restart cannot leave the dot gone with no way back.
 - **The modal's height is measured, not guessed** (`clipTextHeight` lays the text out with a
   `StaticLayout`, `fitClipPanel` sizes the window): an overlay window has a fixed height, and
   the requirement is 70% of the screen wide and as tall as the text needs, capped at
@@ -633,6 +641,12 @@ this list honest — do not move rows up without actually re-testing.
   4 lines), `clean` took it to 63 chars on 1 line, and a tap on the chip at `(1456,855)`
   logged `clip reset 63 -> 78 chars` and left the textarea back at 4 lines. The op path is in
   the smoke test (`clip reset` 67 -> 112 chars).
+- **Auto-hide's clock is exact**: `clip ping` at `23:12:22.713` logged
+  `clip dot auto-hidden after 1 min` at `23:13:22.714` - 60s, to the millisecond. `hide-now`
+  took the dot away (`dot=off ready=off`) and a second ping brought it back, both measured;
+  the smoke test covers those three steps rather than sleeping through a window.
+- **`scripts/clipcopy` works end to end**: `printf '%s' "$junk" | clipcopy` left the clipboard
+  holding the specimen and the dot up with `ready=on`, the 1-minute clock armed.
 - **The modal's geometry is exact**, measured from `dumpsys window`: the panel is
   `(272,817)(1268x541)` on a 1812x2176 display (1268 = 0.7 x 1812, centred; the height grew
   from 422 when the textarea got its padded box) and the `✂` dot is

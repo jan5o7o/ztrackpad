@@ -147,13 +147,13 @@ const vdisplayTool = defineTool({
 		clipAction: Type.Optional(
 			Type.String({
 				description:
-					"For op=clip: show|hide|toggle|read|clean|copy|junk|join the clipboard modal, or 'set' to put the text in `text` on the system clipboard. No value reads the state back.",
+					"For op=clip: show|hide|toggle|read|clean|reset|copy|fit|ping|hide-now|junk|join|auto-hide|hide-after the clipboard modal, or 'set' to put the text in `text` on the system clipboard. 'ping' is the copy trigger - show the dot, arm auto-hide - and is what scripts/clipcopy sends. No value reads the state back.",
 			}),
 		),
 		clipValue: Type.Optional(
 			Type.String({
 				description:
-					"For op=clip with clipAction=junk or join: on|off.",
+					"For op=clip with clipAction=junk, join or auto-hide: on|off. For hide-after: minutes, 1..120.",
 			}),
 		),
 	}),

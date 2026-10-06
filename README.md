@@ -392,9 +392,12 @@ text sits in a darker bordered box inside the modal, which is 70% of the screen 
 tall as its text needs, so a short clip is a short box. Drag any corner to resize it and the
 textarea scrolls inside instead (`vdisplay clip fit` hands the size back to the text).
 **reset**, in the title bar, puts the clipboard's own text back into the textarea — nothing is
-written until **copy**, so the original is always there to undo a Clean or a hand edit. The
-cleaner is the pure-Java `Cleaner` (no Android imports), unit-tested by `tests/cleaner.sh` —
-43 checks, runnable without the platform jar.
+written until **copy**, so the original is always there to undo a Clean or a hand edit. With
+**auto-hide** on (CONTROLS, off by default) the dot appears when something tells ztrackpad a
+copy happened and hides itself two minutes later — and the something is `scripts/clipcopy`,
+because this platform gives a background app no copy signal at all. The cleaner is the pure-Java
+`Cleaner` (no Android imports), unit-tested by `tests/cleaner.sh` — 43 checks, runnable without
+the platform jar.
 
 ### Scriptable, if you would rather not tap
 
@@ -413,8 +416,9 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
   letter line gutters, invisibles, stray padding) and **remove new lines** (line breaks become
   single spaces). **copy** writes the result back to the clipboard. Hold **clean** to also
   unwrap terminal-wrapped lines. Resizable from any corner — the textarea scrolls inside — with
-  **reset** in the title bar to put the clipboard's own text back. 70% of the screen wide by
-  default, as tall as its text. On by default; switchable from CONTROLS.
+  **reset** in the title bar to put the clipboard's own text back, and an optional **auto-hide**
+  that takes the dot away two minutes after a ping. 70% of the screen wide by default, as tall as
+  its text. On by default; switchable from CONTROLS.
 - **Floating-window list** (`▤`): every window on the display in one place — the full-screen app
   first, then each floating window, front-most first. Tap a row to raise it, so a window that is
   hidden behind another (or minimized) comes back; tapping the full-screen row minimizes whatever
@@ -656,7 +660,8 @@ clipdot=on clipready=off keys=default"`.
   open it, `read` pulls the system clipboard in, `clean` runs the ticked transforms, `reset`
   puts the clipboard's own text back (the modal's `reset` button), `junk on|off` and
   `join on|off` set the two checkboxes, `fit` hands the window size back to the text, `copy`
-  writes the text back and closes, and `--es arg set --es spec '<text>'` puts text on the
+  writes the text back and closes, `ping` shows the dot and arms its clock, `auto-hide on|off`
+  and `hide-after <min>` set that clock, and `--es arg set --es spec '<text>'` puts text on the
   clipboard (which is how the smoke test feeds it a junk specimen). `status` reports
   `clip=shown|hidden`, `clipdot=on|off` and `clipready=on|off`.
 - **`launch` puts an app on the display** through the same Shizuku shell bridge the

@@ -39,6 +39,14 @@ Nothing yet.
   textarea, undoing a Clean or a hand edit. Nothing is written to the clipboard until `copy`, so
   the original is always there to go back to. Same code path as `vdisplay clip reset`, and
   covered by the smoke test (`clip reset` 67 -> 112 chars).
+- **Auto-hide, and the one copy trigger there is.** The dot cannot know a copy happened on its
+  own — there is no background copy signal on this device (four routes measured negative, see
+  AGENTS.md). So `scripts/clipcopy` closes the gap: it puts text on the clipboard through
+  ztrackpad and then pings it. With `vdisplay clip auto-hide on` (off by default) the dot appears
+  on the ping and hides itself `clip hide-after` minutes later (default 2, 1..120); the clock is
+  cancelled while the modal is open and restarts when it closes. Also `clip ping`, `clip
+  hide-now`, and a CONTROLS row for the switch. Measured exact: a 1-minute window hid the dot 60s
+  to the millisecond.
 - **The cleaner learned two more shapes, from a real copy** (`z✓ │`, `L○ │` and a two-pane
   line, all measured):
   - **herdr's LETTER counters.** A letter with a circle or a check after it is a row counter,
@@ -54,10 +62,12 @@ Nothing yet.
 - The cleaner itself is a **pure-Java class with no Android imports**, so `tests/cleaner.sh`
   compiles and runs it with plain `javac`/`java` — no platform jar, 43 checks. The same file
   is what the modal calls, so the tested transform and the shipped one cannot drift.
-- **Scriptable**: `vdisplay clip [show|hide|toggle|read|clean|reset|copy|fit|junk on|off|join
-  on|off]`, plus `clip-set '<text>'` to put text on the clipboard. `status` gained `clip=`,
-  `clipdot=` and `clipready=`; the `clip` reply also carries `junk=`, `join=`, `sized=`,
-  `lines=` and `chars=`, and `bubbles` now also takes `clip=on|off`.
+- **Scriptable**: `vdisplay clip [show|hide|toggle|read|clean|reset|copy|fit|ping|hide-now|junk
+  on|off|join on|off|auto-hide on|off|hide-after <min>]`, plus `clip-set '<text>'` to put text on
+  the clipboard. `status` gained `clip=`, `clipdot=` and `clipready=`; the `clip` reply also
+  carries `dot=`, `ready=`, `autohide=`, `hide=`, `junk=`, `join=`, `sized=`, `lines=` and
+  `chars=`, and `bubbles` now also takes `clip=on|off`. `scripts/clipcopy` wraps `clip-set` and
+  `clip ping` into the one step a copy should be.
 
 ### Notes
 
@@ -80,10 +90,14 @@ Nothing yet.
 ### Tests
 
 - `tests/smoke.sh --with-clip` drives the whole modal end to end: set a junk specimen, open,
-  read, clean, copy, and read the clipboard back; then the two checkboxes (junk/join round-trip,
-  and `remove new lines` flattening 4 lines to 1). Off by default because it clobbers the
-  system clipboard, and it pins and restores the two persisted options. The `bubbles`
-  round-trip now covers all three dots.
+  read, clean, reset, copy, and read the clipboard back; then the two checkboxes (junk/join
+  round-trip, and `remove new lines` flattening 4 lines to 1), and auto-hide (a ping shows the
+  dot, `hide-now` takes it away, a second ping brings it back, `hide-after 0` is refused). Off by
+  default because it clobbers the system clipboard, and it pins and restores every persisted
+  option. The `bubbles` round-trip now covers all three dots. The clip section closes and re-fits
+  the modal first, because the textarea keeps its contents between opens until the posted read
+  lands - without that the first poll read the previous text and reported numbers that could not
+  both be true.
 
 ## 0.7.0 — 2026-10-04
 

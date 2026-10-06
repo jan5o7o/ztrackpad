@@ -22,7 +22,14 @@
 #   vdisplay clip [op]             # clipboard modal: show|hide|toggle|read|clean|copy
 #   vdisplay clip junk on|off      # what `clean` strips (terminal artifacts)
 #   vdisplay clip join on|off      # what `clean` joins (line breaks -> spaces)
+#   vdisplay clip reset            # put the clipboard's own text back (the reset button)
+#   vdisplay clip ping             # a copy happened: show the dot, arm the auto-hide clock
+#   vdisplay clip auto-hide on|off # hide the dot after the window below
+#   vdisplay clip hide-after <min> # window length in minutes (1..120, default 2)
 #   vdisplay clip-set '<text>'     # put text on the system clipboard (fires the dot)
+#
+# scripts/clipcopy wraps clip-set + ping in one step, which is the intended way to copy
+# something you want ztrackpad to offer to clean.
 #
 # ztrackpad must be running with its accessibility service enabled and Shizuku
 # granted: it owns the overlay windows and the Shizuku binding, so this only pokes it

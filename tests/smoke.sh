@@ -567,6 +567,41 @@ if $with_clip; then
     state_line clip --es arg junk --es spec "$junk_was" >/dev/null
     state_line clip --es arg join --es spec "$join_was" >/dev/null
     state_line clip --es arg hide >/dev/null
+
+    # Auto-hide: the dot lives only inside its window, which a ping opens. The timer's effect
+    # is checked through `hide-now` rather than by sleeping a minute out. The panel has to be
+    # closed first - the hide deliberately refuses to run while the modal is open.
+    ah_was=$(field "$(state_line clip)" autohide)
+    hm_was=$(field "$(state_line clip)" hide)
+    state_line clip --es arg auto-hide --es spec on >/dev/null
+    state_line clip --es arg hide-after --es spec 1 >/dev/null
+    state_line clip --es arg ping >/dev/null
+    if [ "$(field "$(state_line clip)" autohide)" = "on" ] \
+            && [ "$(field "$(state_line clip)" dot)" = "on" ]; then
+        ok "clip auto-hide on + ping -> dot=on (hide=1m)"
+    else
+        bad "clip ping did not show the dot"
+    fi
+    state_line clip --es arg hide-now >/dev/null
+    if [ "$(field "$(state_line clip)" dot)" = "off" ] \
+            && [ "$(field "$(state_line clip)" ready)" = "off" ]; then
+        ok "the hide the timer would do takes the dot away (dot=off ready=off)"
+    else
+        bad "hide-now left the dot up"
+    fi
+    state_line clip --es arg ping >/dev/null
+    if [ "$(field "$(state_line clip)" dot)" = "on" ]; then
+        ok "a second ping brings it back"
+    else
+        bad "ping did not restore the dot"
+    fi
+    if state_line clip --es arg hide-after --es spec 0 | grep -q '^error'; then
+        ok "clip hide-after rejects 0 minutes"
+    else
+        bad "clip hide-after accepted 0"
+    fi
+    state_line clip --es arg hide-after --es spec "${hm_was%m}" >/dev/null
+    state_line clip --es arg auto-hide --es spec "$ah_was" >/dev/null
 fi
 
 echo

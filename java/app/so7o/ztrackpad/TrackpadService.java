@@ -232,6 +232,9 @@ public class TrackpadService extends AccessibilityService {
     private static final String PREF_CLIP_JUNK = "clipCleanJunk";
     private static final String PREF_CLIP_JOIN = "clipJoinLines";
     private static final String PREF_CLIP_SIZED = "clipSized";
+    private static final String PREF_CLIP_AUTOHIDE = "clipAutoHide";
+    private static final String PREF_CLIP_HIDE_MIN = "clipHideMinutes";
+    private static final int CLIP_HIDE_MIN_DEFAULT = 2;
 
     /** Pref: edge-strip scrolls bank the gesture and spend it on release - see flickScroll. */
     private static final String PREF_FLICK_SCROLL = "flickScroll";
@@ -385,6 +388,23 @@ public class TrackpadService extends AccessibilityService {
      * `clip fit` hands it back to the text.
      */
     private boolean clipSized = false;
+    /**
+     * Auto-hide: the dot is only on during an "active window" - after a ping, or while the
+     * modal is in use - and hides `clipHideMinutes` later. Off by default, because there is
+     * no background copy signal on this device (four routes measured negative; see AGENTS.md),
+     * so with it on and nothing pinging, the dot is simply gone.
+     */
+    private boolean clipAutoHide = false;
+    private int clipHideMinutes = CLIP_HIDE_MIN_DEFAULT;
+    /** The one in-flight hide. Cancelled by a ping, a panel open, or auto-hide going off. */
+    private final Runnable clipHideTask = new Runnable() {
+        @Override public void run() {
+            if (clipVisible) return;               // never hide out from under an open modal
+            clipReady = false;
+            refreshClipDot();
+            Log.i(TAG, "clip dot auto-hidden after " + clipHideMinutes + " min");
+        }
+    };
     /** The modal's "reset": hands the size back to the text. Dimmed when there is nothing
      *  to reset (the window is already auto-fitting). */
     private TextView clipResetChip;
@@ -504,6 +524,11 @@ public class TrackpadService extends AccessibilityService {
         clipCleanJunk = prefs.getBoolean(PREF_CLIP_JUNK, true);
         clipJoinLines = prefs.getBoolean(PREF_CLIP_JOIN, false);
         clipSized = prefs.getBoolean(PREF_CLIP_SIZED, false);
+        clipAutoHide = prefs.getBoolean(PREF_CLIP_AUTOHIDE, false);
+        clipHideMinutes = prefs.getInt(PREF_CLIP_HIDE_MIN, CLIP_HIDE_MIN_DEFAULT);
+        // With auto-hide on, start in the active window rather than hidden: a restart must
+        // not leave the dot gone with no way back to it.
+        if (clipAutoHide) clipReady = true;
         flickScroll = prefs.getBoolean(PREF_FLICK_SCROLL, false);
         showScrollMarks = prefs.getBoolean(PREF_SHOW_SCROLL_MARKS, true);
         padLocked = prefs.getBoolean(PREF_LOCK, false);
@@ -520,6 +545,7 @@ public class TrackpadService extends AccessibilityService {
         if (displayManager != null) displayManager.registerDisplayListener(displayListener, ui);
         VDisplayReceiver.service = this;
         registerClipListener();
+        armClipHide();
         startShizuku();
         Log.i(TAG, "connected surface=" + screenW + "x" + screenH
                 + " target=display " + targetDisplayId + " " + outW + "x" + outH
@@ -1850,6 +1876,25 @@ public class TrackpadService extends AccessibilityService {
             }
             if ("fit".equals(what)) { setClipAutoFit(); return "ok " + clipStateLine(); }
             if ("reset".equals(what)) { resetClipText(); return "ok " + clipStateLine(); }
+            if ("ping".equals(what)) { pingClipDot(); return "ok " + clipStateLine(); }
+            // The hide the timer would do, now. It is how the smoke test proves the timer's
+            // effect without sleeping through the whole window.
+            if ("hide-now".equals(what)) { clipHideTask.run(); return "ok " + clipStateLine(); }
+            if ("auto-hide".equals(what)) {
+                if (spec == null || spec.length() == 0) return "ok " + clipStateLine();
+                if (!"on".equals(spec) && !"off".equals(spec)) {
+                    return "error: clip auto-hide wants on|off";
+                }
+                setClipAutoHide("on".equals(spec));
+                return "ok " + clipStateLine();
+            }
+            if ("hide-after".equals(what)) {
+                if (spec == null || spec.length() == 0) return "ok " + clipStateLine();
+                int min = parseIntOr(spec.trim(), -1);
+                if (min < 1 || min > 120) return "error: clip hide-after wants 1..120 minutes";
+                setClipHideMinutes(min);
+                return "ok " + clipStateLine();
+            }
             if ("clean".equals(what)) { cleanClipText(false); return "ok " + clipStateLine(); }
             if ("junk".equals(what)) {
                 if (spec == null || spec.length() == 0) return "ok " + clipStateLine();
@@ -1873,7 +1918,8 @@ public class TrackpadService extends AccessibilityService {
                 setSystemClipboard(text);
                 return "ok clip set " + text.length() + " chars";
             }
-            return "error: clip wants show|hide|toggle|read|clean|copy|set|junk|join|fit|reset";
+            return "error: clip wants show|hide|toggle|read|clean|copy|set|junk|join|fit|reset"
+                    + "|ping|auto-hide|hide-after|hide-now";
         }
 
         // arg is a task id from `tasks`. This is the same code path a row tap takes, so a
@@ -4450,7 +4496,8 @@ public class TrackpadService extends AccessibilityService {
             ui.post(new Runnable() {
                 @Override public void run() {
                     clipReady = true;
-                    setClipBubbleVisible(true);
+                    refreshClipDot();
+                    armClipHide();
                     Log.i(TAG, "clipboard changed (focused) - clip dot shown");
                 }
             });
@@ -4511,22 +4558,54 @@ public class TrackpadService extends AccessibilityService {
         clipBubble = v;
         try { wm.addView(clipBubble, clipBubbleLp); }
         catch (Exception ex) { Log.e(TAG, "clipBubble", ex); }
-        setClipBubbleVisible(true);
+        refreshClipDot();
     }
 
     /**
-     * Show or hide the clipboard dot.
-     *
-     * It is always visible when the feature is on - deliberately NOT "appears on copy".
-     * Android only delivers OnPrimaryClipChangedListener to an app that owns the focused
-     * window (measured on this device: the callback never arrives while the overlays are
-     * unfocused, and fires the moment the modal takes focus), and shell cannot read the
-     * clipboard either. So a background dot that waited for a copy would never appear.
-     * The dot is the affordance; the modal reads the clipboard when it opens.
+     * The dot is on when the feature is on, and - with auto-hide - only during the active
+     * window (`clipReady`). Always visible otherwise, which is the default.
      */
-    private void setClipBubbleVisible(boolean visible) {
+    private void refreshClipDot() {
         if (clipBubble == null) return;
-        clipBubble.setVisibility((showClipBubble && visible) ? View.VISIBLE : View.GONE);
+        boolean on = showClipBubble && (!clipAutoHide || clipReady);
+        clipBubble.setVisibility(on ? View.VISIBLE : View.GONE);
+    }
+
+    /** (Re)start the auto-hide clock. Cancels any pending hide, and does not arm while the
+     *  modal is open or auto-hide is off. */
+    private void armClipHide() {
+        ui.removeCallbacks(clipHideTask);
+        if (!clipAutoHide || clipVisible) return;
+        ui.postDelayed(clipHideTask, clipHideMinutes * 60000L);
+    }
+
+    /**
+     * A copy happened somewhere we were told about: show the dot and start its clock. This is
+     * what `clip ping` calls - the receiver is exported, so any app or script can raise it,
+     * which is the only real copy trigger this platform offers (see AGENTS.md).
+     */
+    private void pingClipDot() {
+        clipReady = true;
+        refreshClipDot();
+        armClipHide();
+        Log.i(TAG, "clip ping - dot shown, hiding in " + clipHideMinutes + " min");
+    }
+
+    private void setClipAutoHide(boolean on) {
+        clipAutoHide = on;
+        prefs.edit().putBoolean(PREF_CLIP_AUTOHIDE, on).apply();
+        // Switching it on must not hide the dot with no way back: open the active window now.
+        if (on) clipReady = true;
+        refreshClipDot();
+        armClipHide();
+        Log.i(TAG, "clip auto-hide -> " + on + " (" + clipHideMinutes + " min)");
+    }
+
+    private void setClipHideMinutes(int minutes) {
+        clipHideMinutes = clampInt(minutes, 1, 120);
+        prefs.edit().putInt(PREF_CLIP_HIDE_MIN, clipHideMinutes).apply();
+        armClipHide();
+        Log.i(TAG, "clip hide-after -> " + clipHideMinutes + " min");
     }
 
     private void buildClipPanel() {
@@ -4744,7 +4823,8 @@ public class TrackpadService extends AccessibilityService {
         clipVisible = visible;
         if (visible) {
             clipReady = true;
-            setClipBubbleVisible(true);
+            refreshClipDot();
+            armClipHide();                 // cancels the pending hide while the modal is open
             if (clipSized) clampGeometryToScreen(clipPanelLp);
             raise(clipPanel, clipPanelLp, "clipPanel");
             clipPanel.setVisibility(View.VISIBLE);
@@ -4761,6 +4841,7 @@ public class TrackpadService extends AccessibilityService {
             if (CURSOR_ABOVE_PANELS) raise(cursor, cursorLp, "cursor");
         } else {
             clipPanel.setVisibility(View.GONE);
+            armClipHide();                 // the clock starts when the modal closes
         }
         Log.i(TAG, "clip panel " + (visible ? "shown" : "hidden"));
     }
@@ -5011,7 +5092,11 @@ public class TrackpadService extends AccessibilityService {
             if (t.charAt(i) == '\n') lines++;
         }
         return "clip panel=" + (clipVisible ? "shown" : "hidden")
+                + " dot=" + onOff(clipBubble != null
+                        && clipBubble.getVisibility() == View.VISIBLE)
                 + " ready=" + onOff(clipReady)
+                + " autohide=" + onOff(clipAutoHide)
+                + " hide=" + clipHideMinutes + "m"
                 + " junk=" + onOff(clipCleanJunk)
                 + " join=" + onOff(clipJoinLines)
                 + " sized=" + onOff(clipSized)
@@ -5691,6 +5776,12 @@ public class TrackpadService extends AccessibilityService {
                     @Override public void onClick(View v) { tick(); setBubbleShown("clip", !showClipBubble); }
                 }));
 
+        controlsRows.addView(sectionLabel("CLIPBOARD DOT"));
+        controlsRows.addView(controlRow("Auto-hide after " + clipHideMinutes + " min", clipAutoHide,
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { tick(); setClipAutoHide(!clipAutoHide); }
+                }));
+
         controlsRows.addView(sectionLabel("SCROLLING"));
         controlsRows.addView(controlRow("Flick to scroll", flickScroll, new View.OnClickListener() {
             @Override public void onClick(View v) { tick(); setFlickScroll(!flickScroll); }
@@ -5785,6 +5876,8 @@ public class TrackpadService extends AccessibilityService {
             prefs.edit().putBoolean(PREF_SHOW_CLIP_BUBBLE, on).apply();
             // switching it on should show it, not leave it waiting for the next copy
             if (on) clipReady = true;
+            refreshClipDot();
+            armClipHide();
         } else {
             Log.w(TAG, "setBubbleShown: unknown dot '" + dot + "'");
             return;

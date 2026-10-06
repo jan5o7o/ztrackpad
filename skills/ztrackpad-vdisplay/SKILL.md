@@ -126,6 +126,30 @@ text and re-centres.
 into the textarea, so a Clean or a hand edit is undone. Nothing is written to the clipboard
 until `copy`, so the original is always there to go back to.
 
+### Auto-hide, and the one copy trigger there is
+
+The dot cannot know a copy happened on its own - there is no background copy signal on this
+device (four routes measured negative; see AGENTS.md). `scripts/clipcopy` closes that gap: it
+puts text on the clipboard through ztrackpad and then pings it.
+
+```bash
+printf '%s' "$junk" | scripts/clipcopy     # no arguments reads stdin
+scripts/clipcopy "some text"
+```
+
+With auto-hide on, the dot then appears on the ping and goes away by itself:
+
+```bash
+scripts/vdisplay clip auto-hide on     # off by default
+scripts/vdisplay clip hide-after 2     # minutes, 1..120
+scripts/vdisplay clip ping             # what clipcopy sends
+scripts/vdisplay clip hide-now         # the hide the timer would do, now (testing)
+```
+
+While the modal is open the clock is cancelled, and it restarts when the modal closes. With
+auto-hide on and nothing pinging, the dot is simply gone - CONTROLS has the switch, and
+`clip auto-hide off` is the way back.
+
 Two platform facts shape this, and both are measured on this device:
 
 - **Reading the clipboard needs window focus.** Android's `ClipboardService` only lets an app
