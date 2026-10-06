@@ -389,9 +389,12 @@ padding a `\r` redraw leaves behind) while leaving code indentation alone, and *
 lines** turns line breaks into single spaces for when the paste has to be one line. Both are
 remembered. **copy** puts the result back on the clipboard, ready to paste into Termux. The
 text sits in a darker bordered box inside the modal, which is 70% of the screen wide and as
-tall as its text needs, so a short clip is a short box. The cleaner is the pure-Java `Cleaner`
-(no Android imports), unit-tested by `tests/cleaner.sh` — 43 checks, runnable without the
-platform jar.
+tall as its text needs, so a short clip is a short box. Drag any corner to resize it and the
+textarea scrolls inside instead (`vdisplay clip fit` hands the size back to the text).
+**reset**, in the title bar, puts the clipboard's own text back into the textarea — nothing is
+written until **copy**, so the original is always there to undo a Clean or a hand edit. The
+cleaner is the pure-Java `Cleaner` (no Android imports), unit-tested by `tests/cleaner.sh` —
+43 checks, runnable without the platform jar.
 
 ### Scriptable, if you would rather not tap
 
@@ -409,8 +412,9 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
   artifacts a copy out of a terminal picks up: ANSI, pane borders and title bars, digit *and*
   letter line gutters, invisibles, stray padding) and **remove new lines** (line breaks become
   single spaces). **copy** writes the result back to the clipboard. Hold **clean** to also
-  unwrap terminal-wrapped lines. 70% of the screen wide, as tall as its text. On by default;
-  switchable from CONTROLS.
+  unwrap terminal-wrapped lines. Resizable from any corner — the textarea scrolls inside — with
+  **reset** in the title bar to put the clipboard's own text back. 70% of the screen wide by
+  default, as tall as its text. On by default; switchable from CONTROLS.
 - **Floating-window list** (`▤`): every window on the display in one place — the full-screen app
   first, then each floating window, front-most first. Tap a row to raise it, so a window that is
   hidden behind another (or minimized) comes back; tapping the full-screen row minimizes whatever
@@ -648,12 +652,13 @@ clipdot=on clipready=off keys=default"`.
   affordance that says where scrolling lives. Cosmetic, so it only redraws the pad; same
   setter as the CONTROLS row; `status` reports `marks=on|off`.
 - **`clip`** drives the clipboard modal without a finger: no argument reads its state back
-  (`panel=`, `ready=`, `junk=`, `join=`, `lines=`, `chars=`), `show`/`hide`/`toggle` open it,
-  `read` pulls the system clipboard in, `clean` runs the Cleaner, `copy` writes the text back
-  and closes, `junk on|off` and `join on|off` set the two checkboxes, and
-  `--es arg set --es spec '<text>'` puts text on the clipboard (which is how the smoke test
-  feeds it a junk specimen). `status` reports `clip=shown|hidden`, `clipdot=on|off` and
-  `clipready=on|off`.
+  (`panel=`, `ready=`, `junk=`, `join=`, `sized=`, `lines=`, `chars=`), `show`/`hide`/`toggle`
+  open it, `read` pulls the system clipboard in, `clean` runs the ticked transforms, `reset`
+  puts the clipboard's own text back (the modal's `reset` button), `junk on|off` and
+  `join on|off` set the two checkboxes, `fit` hands the window size back to the text, `copy`
+  writes the text back and closes, and `--es arg set --es spec '<text>'` puts text on the
+  clipboard (which is how the smoke test feeds it a junk specimen). `status` reports
+  `clip=shown|hidden`, `clipdot=on|off` and `clipready=on|off`.
 - **`launch` puts an app on the display** through the same Shizuku shell bridge the
   display was created with, so it works for headless displays too: `vdisplay launch
   com.android.settings`, or `vdisplay launch com.android.chrome --url '…'`.

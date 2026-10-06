@@ -305,6 +305,27 @@ pixels to composite, so it fails cleanly.
   background; the box owns both. `fitClipPanel` has to subtract *both* (margin + padding) when
   it computes the text width, or the text wraps differently from the `StaticLayout` that
   measured it and the window comes out the wrong height.
+- **The textarea is `weight 1`, not a measured height.** The box takes whatever the window
+  leaves after the title, hint, checkboxes and buttons, so the text scrolls inside it. That is
+  what makes the modal resizable: shrink it and the textarea scrolls instead of the window
+  fighting back.
+- **The modal is resizable, and the first grip drag turns the auto-fit off.** Grips are the
+  shared ones (`CLIP_KEY` = `x_`), so the geometry persists like every other panel; the grip
+  calls the `onSized` hook added to `addResizeGrips`, which sets `clipSized` (persisted). While
+  `clipSized` is set, `fitClipPanel` returns early and the text scrolls in the user's window;
+  `clip fit` (the op - there is no UI for it) clears the flag and re-fits. Without that flag
+  the two would fight: every Clean or keystroke re-measures the text and would undo the resize.
+- **`reset` is the TEXT, not the window** (`resetClipText`): it re-reads the clipboard into the
+  textarea, undoing a Clean or a hand edit. Nothing is written to the clipboard until `copy`,
+  so the original is always there to go back to - that is what makes it safe, and why it costs
+  one read. `clip reset` is the same code path as the button.
+- **`reset` lives in the title bar, not the options row.** In the options row it was a small
+  chip wedged between the checkboxes and the action buttons, and a tap that missed it landed on
+  `cancel` and closed the modal - measured, twice, while trying to verify it. In the bar it gets
+  a corner of its own and, being a child of the bar, wins the touch over the bar's drag listener
+  (the same reason the pad's docked dots work). Its right margin is `dp(14)`, not `dp(4)`: the
+  panel's corner radius is `theme.radius` (`dp(18)`), so a smaller margin lets the pressed pill
+  spill outside the rounded corner - the identical trap the pad's first docked dot hit.
 - **The modal's height is measured, not guessed** (`clipTextHeight` lays the text out with a
   `StaticLayout`, `fitClipPanel` sizes the window): an overlay window has a fixed height, and
   the requirement is 70% of the screen wide and as tall as the text needs, capped at
@@ -582,6 +603,13 @@ this list honest — do not move rows up without actually re-testing.
   mid-line `4○│` replaced by a space (`suite). - End-to-end:`), and the `───│ Two notes: ...`
   sentence kept. Before the letter rule those two lines kept a stray `z✓` / `L`, and the rule
   line was dropped whole, losing the sentence after it.
+- **The modal resizes and re-fits on device**: an injected grip drag took it `1268x1061` ->
+  `1268x733` (and a later one `1126x812`), `sized` flipped to `on` and the geometry survived a
+  reinstall; `clip fit` put it back to `1268x1061`, centred.
+- **The `reset` button works from the title bar**: with a junk specimen read in (78 chars,
+  4 lines), `clean` took it to 63 chars on 1 line, and a tap on the chip at `(1456,855)`
+  logged `clip reset 63 -> 78 chars` and left the textarea back at 4 lines. The op path is in
+  the smoke test (`clip reset` 67 -> 112 chars).
 - **The modal's geometry is exact**, measured from `dumpsys window`: the panel is
   `(272,817)(1268x541)` on a 1812x2176 display (1268 = 0.7 x 1812, centred; the height grew
   from 422 when the textarea got its padded box) and the `✂` dot is

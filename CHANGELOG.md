@@ -31,6 +31,14 @@ Nothing yet.
   the modal; the modal is 70% of the screen wide and as tall as its text needs, up to a cap
   (past that the textarea scrolls), and it is centred so a keyboard never covers it. Tap the
   text to edit it with the system keyboard; the keys panel types into it too.
+- **The modal is resizable and its textarea scrolls.** Drag any corner — only the bottom-right
+  grip is drawn — and the window keeps the size you gave it, with the text scrolling inside
+  instead of the window growing to fit. Scriptable as `vdisplay clip fit`; the state reads back
+  as `sized=on|off`.
+- **`reset`**, the chip in the modal's title bar, puts the clipboard's own text back into the
+  textarea, undoing a Clean or a hand edit. Nothing is written to the clipboard until `copy`, so
+  the original is always there to go back to. Same code path as `vdisplay clip reset`, and
+  covered by the smoke test (`clip reset` 67 -> 112 chars).
 - **The cleaner learned two more shapes, from a real copy** (`z✓ │`, `L○ │` and a two-pane
   line, all measured):
   - **herdr's LETTER counters.** A letter with a circle or a check after it is a row counter,
@@ -46,10 +54,10 @@ Nothing yet.
 - The cleaner itself is a **pure-Java class with no Android imports**, so `tests/cleaner.sh`
   compiles and runs it with plain `javac`/`java` — no platform jar, 43 checks. The same file
   is what the modal calls, so the tested transform and the shipped one cannot drift.
-- **Scriptable**: `vdisplay clip [show|hide|toggle|read|clean|copy|junk on|off|join on|off]`,
-  plus `clip-set '<text>'` to put text on the clipboard. `status` gained `clip=`, `clipdot=`
-  and `clipready=`; the `clip` reply also carries `junk=`, `join=`, `lines=` and `chars=`, and
-  `bubbles` now also takes `clip=on|off`.
+- **Scriptable**: `vdisplay clip [show|hide|toggle|read|clean|reset|copy|fit|junk on|off|join
+  on|off]`, plus `clip-set '<text>'` to put text on the clipboard. `status` gained `clip=`,
+  `clipdot=` and `clipready=`; the `clip` reply also carries `junk=`, `join=`, `sized=`,
+  `lines=` and `chars=`, and `bubbles` now also takes `clip=on|off`.
 
 ### Notes
 

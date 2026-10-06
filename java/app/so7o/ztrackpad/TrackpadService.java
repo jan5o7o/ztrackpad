@@ -194,6 +194,7 @@ public class TrackpadService extends AccessibilityService {
     private static final String THEME_KEY = "t_";
     private static final String TASKS_KEY = "f_";
     private static final String CONTROLS_KEY = "c_";
+    private static final String CLIP_KEY = "x_";
 
     /** Pref holding the *uniqueId* of the target display (ids are not stable). */
     private static final String PREF_TARGET_DISPLAY = "targetDisplay";
@@ -230,6 +231,7 @@ public class TrackpadService extends AccessibilityService {
     private static final String PREF_SHOW_CLIP_BUBBLE = "showClipBubble";
     private static final String PREF_CLIP_JUNK = "clipCleanJunk";
     private static final String PREF_CLIP_JOIN = "clipJoinLines";
+    private static final String PREF_CLIP_SIZED = "clipSized";
 
     /** Pref: edge-strip scrolls bank the gesture and spend it on release - see flickScroll. */
     private static final String PREF_FLICK_SCROLL = "flickScroll";
@@ -377,6 +379,15 @@ public class TrackpadService extends AccessibilityService {
      */
     private boolean clipCleanJunk = true;
     private boolean clipJoinLines = false;
+    /**
+     * True once a grip has been dragged: the modal keeps the size the user gave it and the
+     * text scrolls inside, instead of the window growing to fit the text. Persisted, and
+     * `clip fit` hands it back to the text.
+     */
+    private boolean clipSized = false;
+    /** The modal's "reset": hands the size back to the text. Dimmed when there is nothing
+     *  to reset (the window is already auto-fitting). */
+    private TextView clipResetChip;
     private TextView clipJunkBox, clipJoinBox;
     private ClipboardManager clipboardManager;
     private LinearLayout tasksRows;
@@ -492,6 +503,7 @@ public class TrackpadService extends AccessibilityService {
         showClipBubble = prefs.getBoolean(PREF_SHOW_CLIP_BUBBLE, true);
         clipCleanJunk = prefs.getBoolean(PREF_CLIP_JUNK, true);
         clipJoinLines = prefs.getBoolean(PREF_CLIP_JOIN, false);
+        clipSized = prefs.getBoolean(PREF_CLIP_SIZED, false);
         flickScroll = prefs.getBoolean(PREF_FLICK_SCROLL, false);
         showScrollMarks = prefs.getBoolean(PREF_SHOW_SCROLL_MARKS, true);
         padLocked = prefs.getBoolean(PREF_LOCK, false);
@@ -598,7 +610,10 @@ public class TrackpadService extends AccessibilityService {
             resnapBubble(keysBubble, keysBubbleLp, keysBubbleSide);
             resnapBubble(tasksBubble, tasksBubbleLp, tasksBubbleSide);
             resnapBubble(clipBubble, clipBubbleLp, clipBubbleSide);
-            if (clipVisible) fitClipPanel();
+            if (clipVisible) {
+                clampGeometryToScreen(clipPanelLp);
+                if (!clipSized) fitClipPanel();
+            }
         }
     }
 
@@ -1827,6 +1842,8 @@ public class TrackpadService extends AccessibilityService {
                 fitClipPanel();
                 return "ok " + clipStateLine();
             }
+            if ("fit".equals(what)) { setClipAutoFit(); return "ok " + clipStateLine(); }
+            if ("reset".equals(what)) { resetClipText(); return "ok " + clipStateLine(); }
             if ("clean".equals(what)) { cleanClipText(false); return "ok " + clipStateLine(); }
             if ("junk".equals(what)) {
                 if (spec == null || spec.length() == 0) return "ok " + clipStateLine();
@@ -1850,7 +1867,7 @@ public class TrackpadService extends AccessibilityService {
                 setSystemClipboard(text);
                 return "ok clip set " + text.length() + " chars";
             }
-            return "error: clip wants show|hide|toggle|read|clean|copy|set|junk|join";
+            return "error: clip wants show|hide|toggle|read|clean|copy|set|junk|join|fit|reset";
         }
 
         // arg is a task id from `tasks`. This is the same code path a row tap takes, so a
@@ -2955,18 +2972,29 @@ public class TrackpadService extends AccessibilityService {
      */
     private void addResizeGrips(FrameLayout container, WindowManager.LayoutParams lp,
                                 String prefix, boolean includeTopLeft) {
-        addGrip(container, container, lp, prefix, Gravity.BOTTOM | Gravity.RIGHT, 1, 1, true);
+        addResizeGrips(container, lp, prefix, includeTopLeft, null);
+    }
+
+    /**
+     * `onSized` runs after a drag is committed and the geometry saved. The shared grip knows
+     * nothing about what a panel does with its size; the clipboard modal uses this to stop
+     * auto-fitting to its text, which is the one panel that does.
+     */
+    private void addResizeGrips(FrameLayout container, WindowManager.LayoutParams lp,
+                                String prefix, boolean includeTopLeft, final Runnable onSized) {
+        addGrip(container, container, lp, prefix, Gravity.BOTTOM | Gravity.RIGHT, 1, 1, true, onSized);
         if (includeTopLeft) {
-            addGrip(container, container, lp, prefix, Gravity.TOP | Gravity.LEFT, -1, -1, false);
+            addGrip(container, container, lp, prefix, Gravity.TOP | Gravity.LEFT, -1, -1, false, onSized);
         }
-        addGrip(container, container, lp, prefix, Gravity.TOP | Gravity.RIGHT, 1, -1, false);
-        addGrip(container, container, lp, prefix, Gravity.BOTTOM | Gravity.LEFT, -1, 1, false);
+        addGrip(container, container, lp, prefix, Gravity.TOP | Gravity.RIGHT, 1, -1, false, onSized);
+        addGrip(container, container, lp, prefix, Gravity.BOTTOM | Gravity.LEFT, -1, 1, false, onSized);
     }
 
     /** dirX / dirY: -1 = this grip owns the left/top edge, +1 = right/bottom edge. */
     private void addGrip(FrameLayout parent, final View target,
                          final WindowManager.LayoutParams lp, final String prefix,
-                         int gravity, final int dirX, final int dirY, boolean visible) {
+                         int gravity, final int dirX, final int dirY, boolean visible,
+                         final Runnable onSized) {
         // invisible grips have no background but still receive touches, which is the
         // whole point of them
         View g = visible ? makeGrip() : new View(this);
@@ -3009,6 +3037,7 @@ public class TrackpadService extends AccessibilityService {
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
                         saveGeometry(lp, prefix);
+                        if (onSized != null) onSized.run();
                         return true;
                 }
                 return false;
@@ -4499,14 +4528,33 @@ public class TrackpadService extends AccessibilityService {
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
 
-        LinearLayout title = new LinearLayout(this);
-        title.setGravity(Gravity.CENTER);
+        FrameLayout title = new FrameLayout(this);
         GradientDrawable tbg = new GradientDrawable();
         tbg.setCornerRadii(new float[]{dp(theme.radius), dp(theme.radius),
                 dp(theme.radius), dp(theme.radius), 0, 0, 0, 0});
         tbg.setColor(fill(theme.panelHead));
         title.setBackground(tbg);
-        title.addView(makeChip("\u2702  CLIPBOARD \u2014 clean, then copy"));
+        title.addView(makeChip("\u2702  CLIPBOARD"),
+                new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER));
+        // `reset` rides in the title bar, not the options row: there it was a small target
+        // wedged between the checkboxes and the action buttons, and a tap that missed it
+        // landed on cancel (measured). Here it has the full bar height and a corner of its
+        // own. It is a child of the bar, so it wins the touch over the bar's drag listener.
+        clipResetChip = modalLink("\u21ba\uFE0E  reset", new Runnable() {
+            @Override public void run() { resetClipText(); }
+        });
+        FrameLayout.LayoutParams rlp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, dp(26),
+                Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        // Clear the panel's rounded top-right corner (theme.radius, dp(18) by default): at
+        // dp(4) the pressed pill spilled outside the curve, the same way the pad's first
+        // docked dot sat glued to its edge. dp(4) of vertical inset keeps the pill off the
+        // bar's own edges and centres it in the dp(34) bar.
+        rlp.rightMargin = dp(14);
+        rlp.topMargin = dp(4);
+        rlp.bottomMargin = dp(4);
+        title.addView(clipResetChip, rlp);
         title.setOnTouchListener(new View.OnTouchListener() {
             private float dx, dy;
             @Override public boolean onTouch(View view, MotionEvent e) {
@@ -4562,11 +4610,15 @@ public class TrackpadService extends AccessibilityService {
         clipScroll.addView(clipEdit, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
         LinearLayout.LayoutParams fieldLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(120));
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
         fieldLp.leftMargin = dp(CLIP_FIELD_MARGIN_DP);
         fieldLp.rightMargin = dp(CLIP_FIELD_MARGIN_DP);
         fieldLp.topMargin = dp(CLIP_FIELD_MARGIN_DP);
         fieldLp.bottomMargin = dp(CLIP_FIELD_MARGIN_DP);
+        // weight 1, not a measured height: the box takes whatever the window leaves after
+        // the title, hint, checkboxes and buttons, and the text scrolls inside it. That is
+        // what makes the modal resizable - shrink it and the textarea scrolls rather than
+        // the window fighting back.
         content.addView(clipScroll, fieldLp);
 
         TextView hint = new TextView(this);
@@ -4643,6 +4695,13 @@ public class TrackpadService extends AccessibilityService {
         clipPanelLp.y = Math.max(0, (screenH - clipPanelLp.height) / 2);
         clipPanel = container;
 
+        // Resizable like every other panel, with the bottom-right grip drawn and the other
+        // three invisible. The first drag turns the auto-fit off (see markClipSized).
+        addResizeGrips(container, clipPanelLp, CLIP_KEY, true, new Runnable() {
+            @Override public void run() { markClipSized(); }
+        });
+        if (clipSized) restoreGeometryAt(clipPanelLp, CLIP_KEY, clipPanelWidth(), dp(240), 0, 0);
+
         try { wm.addView(clipPanel, clipPanelLp); }
         catch (Exception ex) { Log.e(TAG, "clipPanel", ex); }
         setClipVisible(false);
@@ -4680,6 +4739,7 @@ public class TrackpadService extends AccessibilityService {
         if (visible) {
             clipReady = true;
             setClipBubbleVisible(true);
+            if (clipSized) clampGeometryToScreen(clipPanelLp);
             raise(clipPanel, clipPanelLp, "clipPanel");
             clipPanel.setVisibility(View.VISIBLE);
             // The read has to wait for the window to actually hold focus, which the
@@ -4744,6 +4804,20 @@ public class TrackpadService extends AccessibilityService {
         return t;
     }
 
+    /** A quiet chip for the modal: no ballot box and no fill until it is pressed. */
+    private TextView modalLink(String label, final Runnable action) {
+        TextView t = new TextView(this);
+        t.setText(label);
+        t.setTextSize(11f);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(10), 0, dp(10), 0);
+        t.setBackground(keyBgState(0x00000000, theme.accent));
+        t.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { tick(); action.run(); }
+        });
+        return t;
+    }
+
     private void styleCheck(TextView t, String label, boolean on) {
         if (t == null) return;
         t.setText((on ? "\u2611\uFE0E  " : "\u2610\uFE0E  ") + label);
@@ -4753,6 +4827,20 @@ public class TrackpadService extends AccessibilityService {
     private void refreshClipChecks() {
         styleCheck(clipJunkBox, "clean junk", clipCleanJunk);
         styleCheck(clipJoinBox, "remove new lines", clipJoinLines);
+    }
+
+    /**
+     * The modal's `reset`, and the `clip reset` op: put the clipboard's own text back, so
+     * a Clean or a hand edit is undone. The clipboard is the source of truth - nothing is
+     * written until `copy` - so this always has the original to hand, and it costs one
+     * read. It does not touch the window size; `clip fit` (the op) does that.
+     */
+    private void resetClipText() {
+        if (clipEdit == null) return;
+        int was = clipEdit.getText().length();
+        readClipboard();
+        fitClipPanel();
+        Log.i(TAG, "clip reset " + was + " -> " + clipEdit.getText().length() + " chars");
     }
 
     private void setClipCleanJunk(boolean on) {
@@ -4862,15 +4950,12 @@ public class TrackpadService extends AccessibilityService {
      */
     private void fitClipPanel() {
         if (clipPanel == null || clipEdit == null || clipPanelLp == null) return;
+        // A hand-sized window keeps its size; the textarea scrolls inside it instead.
+        if (clipSized) return;
         int w = clipPanelWidth();
         int textW = w - 2 * dp(CLIP_FIELD_MARGIN_DP + CLIP_FIELD_PAD_DP);
         int textH = clipTextHeight(clipEdit.getText(), textW,
                 (int) (screenH * CLIP_TEXT_MAX_H_FRAC));
-        LinearLayout.LayoutParams slp = (LinearLayout.LayoutParams) clipScroll.getLayoutParams();
-        if (slp != null) {
-            slp.height = textH;
-            clipScroll.setLayoutParams(slp);
-        }
         int total = dp(34) + 2 * dp(CLIP_FIELD_MARGIN_DP) + textH + dp(20) + dp(28) + dp(46);
         total = Math.min(total, (int) (screenH * 0.92f));
         clipPanelLp.width = w;
@@ -4878,6 +4963,25 @@ public class TrackpadService extends AccessibilityService {
         clipPanelLp.x = Math.max(0, (screenW - w) / 2);
         clipPanelLp.y = Math.max(0, (screenH - total) / 2);
         try { wm.updateViewLayout(clipPanel, clipPanelLp); } catch (Exception ignored) {}
+    }
+
+    /** A grip drag means the user has taken the size over: stop fitting to the text. */
+    private void markClipSized() {
+        if (clipSized) return;
+        clipSized = true;
+        prefs.edit().putBoolean(PREF_CLIP_SIZED, true).apply();
+        refreshClipChecks();
+        Log.i(TAG, "clip modal sized by hand - auto-fit off");
+    }
+
+    /** `clip fit`, and the modal's own `reset`: hand the size back to the text and re-centre. */
+    private void setClipAutoFit() {
+        clipSized = false;
+        prefs.edit().putBoolean(PREF_CLIP_SIZED, false).apply();
+        if (clipPanelLp != null) clipPanelLp.width = clipPanelWidth();
+        fitClipPanel();
+        refreshClipChecks();
+        Log.i(TAG, "clip modal auto-fit restored");
     }
 
     /** Lay the text out off-screen to learn the height the textarea wants. */
@@ -4904,6 +5008,7 @@ public class TrackpadService extends AccessibilityService {
                 + " ready=" + onOff(clipReady)
                 + " junk=" + onOff(clipCleanJunk)
                 + " join=" + onOff(clipJoinLines)
+                + " sized=" + onOff(clipSized)
                 + " lines=" + lines
                 + " chars=" + t.length();
     }

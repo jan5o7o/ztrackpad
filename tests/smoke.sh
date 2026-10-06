@@ -468,6 +468,10 @@ if $with_clip; then
     join_was=$(field "$(state_line clip)" join)
     state_line clip --es arg junk --es spec on >/dev/null
     state_line clip --es arg join --es spec off >/dev/null
+    # Start from a closed, auto-fitting modal. It keeps its textarea contents between opens
+    # until the posted read lands, so an open panel would hand the poll below stale numbers.
+    state_line clip --es arg hide >/dev/null
+    state_line clip --es arg fit >/dev/null
     # A junk specimen with a real pane title bar, a zellij gutter and padded columns, so
     # the Cleaner has something to strip. printf supplies the ESC and the box bytes.
     junk=$(printf '$ adb logcat -s ZTrackpad\n\x1b[32m\xe2\x94\x8c\xe2\x94\x80 herdr \xe2\x94\x80 pop \xe2\x94\x80\xe2\x94\x80\xe2\x94\x90\x1b[0m\n\xe2\x96\xbe3\xe2\x97\x8f\xe2\x94\x82 Done \xe2\x80\x94 wrapped line\n 1\xe2\x97\x8b\xe2\x94\x82 (JSON config)\n 2\xe2\x97\x8b\xe2\x94\x82 total   0\n')
@@ -481,6 +485,7 @@ if $with_clip; then
     fi
 
     state_line clip --es arg show >/dev/null
+    sleep 0.6            # the read is posted CLIP_SETTLE_MS after the window takes focus
     raw=""
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         raw=$(field "$(state_line clip)" chars)
@@ -501,6 +506,18 @@ if $with_clip; then
         bad "clip clean did not shrink the text ($raw -> $cleaned)"
     fi
 
+    # `reset` (the modal's own button) puts the clipboard's own text back into the textarea,
+    # undoing a Clean or a hand edit. Nothing is written until `copy`, so the original is
+    # always on the clipboard to re-read.
+    state_line clip --es arg reset >/dev/null
+    back=$(field "$(state_line clip)" chars)
+    if [ "$back" = "$raw" ]; then
+        ok "clip reset put the textarea back to the clipboard's text ($cleaned -> $back chars)"
+    else
+        bad "clip reset did not restore the text (wanted $raw, got $back)"
+    fi
+    state_line clip --es arg clean >/dev/null   # leave it cleaned for the copy below
+
     state_line clip --es arg copy >/dev/null
     if [ "$(field "$(state_line clip)" panel)" = "hidden" ]; then
         ok "clip copy closed the modal"
@@ -509,6 +526,7 @@ if $with_clip; then
     fi
 
     state_line clip --es arg show >/dev/null
+    sleep 0.6
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         again=$(field "$(state_line clip)" chars)
         [ "$again" = "$cleaned" ] && break

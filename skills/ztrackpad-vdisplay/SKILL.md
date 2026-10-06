@@ -104,16 +104,27 @@ remembered. Hold **clean** to also unwrap terminal-wrapped lines. The modal is 7
 screen wide and as tall as its text needs, up to a cap (then the textarea scrolls).
 
 ```bash
-scripts/vdisplay clip                 # panel=shown|hidden ready=on junk=on join=off lines=4 chars=67
+scripts/vdisplay clip                 # panel=shown ready=on junk=on join=off sized=off lines=4 chars=67
 scripts/vdisplay clip show            # open it (it reads the clipboard once focused)
 scripts/vdisplay clip read            # re-read the clipboard into the textarea
 scripts/vdisplay clip clean           # run the ticked transforms over the textarea
 scripts/vdisplay clip junk on|off     # the "clean junk" checkbox
 scripts/vdisplay clip join on|off     # the "remove new lines" checkbox
+scripts/vdisplay clip reset           # put the clipboard's own text back (the reset button)
+scripts/vdisplay clip fit             # hand the window size back to the text
 scripts/vdisplay clip copy            # write the textarea back to the clipboard, then close
 scripts/vdisplay clip hide
 scripts/vdisplay clip-set '<text>'    # put text on the system clipboard (fires the dot)
 ```
+
+The modal is resizable from any of its four corners (only the bottom-right grip is drawn).
+Once a grip has been dragged, `sized=on` and the textarea scrolls inside whatever size you
+gave it instead of the window growing to fit the text; `clip fit` hands the size back to the
+text and re-centres.
+
+`reset`, the chip in the modal's title bar, is about the **text**: it re-reads the clipboard
+into the textarea, so a Clean or a hand edit is undone. Nothing is written to the clipboard
+until `copy`, so the original is always there to go back to.
 
 Two platform facts shape this, and both are measured on this device:
 
