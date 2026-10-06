@@ -326,6 +326,29 @@ pixels to composite, so it fails cleanly.
   (the same reason the pad's docked dots work). Its right margin is `dp(14)`, not `dp(4)`: the
   panel's corner radius is `theme.radius` (`dp(18)`), so a smaller margin lets the pressed pill
   spill outside the rounded corner - the identical trap the pad's first docked dot hit.
+- **A copy cannot be detected from the background on this device - four routes measured, all
+  negative (2026-10-06).** This is why the `✂` dot is always visible and the text is read when
+  the modal opens; do not spend another session on it without a new idea.
+  1. **`OnPrimaryClipChangedListener`** fires only while this app owns the focused window
+     (unfocused copy: nothing; the same copy with the modal open: two callbacks).
+  2. **Reading the clipboard** needs focus (AOSP `clipboardAccessAllowed` -> `isUidFocused`),
+     and there is no shell route: `dumpsys clipboard` prints nothing and there is no
+     `cmd clipboard` on this build.
+  3. **The SystemUI "copied" overlay produces no accessibility event.** The service declares
+     `typeWindowStateChanged` and events *do* arrive (an app switch logged one, from
+     `com.android.systemui`), but a copy logged none - so the overlay is not in the a11y window
+     list. A temporary probe in `onAccessibilityEvent` proved it.
+  4. **Samsung's own clipboard service** (`getSystemService("semclipboard")` ->
+     `SemClipboardManager`, `com.samsung.android.clipboard.ACCESS_SEMCLIPBOARD`, protectionLevel
+     `normal` so a third-party app can hold it) registers its listener
+     (`registerClipboardEventListener(SemClipboardEventListener)`) without error, and then never
+     fires - not unfocused, and not even with the modal open, where the AOSP listener did fire.
+     Probed by reflection; `framework.jar` carries the class, so no SDK jar is needed.
+
+  A dot that "appears on copy" therefore needs a signal from outside: any app or script can
+  poke the exported receiver (`--es op clip --es arg show`, which also marks the dot ready), and
+  a dedicated no-UI `ping` op would be a two-line addition to `vdisplayCommand`. That is the
+  only real copy trigger available.
 - **The modal's height is measured, not guessed** (`clipTextHeight` lays the text out with a
   `StaticLayout`, `fitClipPanel` sizes the window): an overlay window has a fixed height, and
   the requirement is 70% of the screen wide and as tall as the text needs, capped at

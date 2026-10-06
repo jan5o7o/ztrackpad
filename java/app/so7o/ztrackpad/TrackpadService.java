@@ -570,6 +570,12 @@ public class TrackpadService extends AccessibilityService {
         return shizuku != null && shizuku.isReady();
     }
 
+    /**
+     * Deliberately a no-op. The service declares `typeWindowStateChanged` and events do
+     * arrive (an app switch produced one), but a COPY produces none - so the SystemUI
+     * "copied" overlay is not a usable copy signal either. Measured 2026-10-06; see the
+     * clipboard section above for the other three routes that were tried and failed.
+     */
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) { /* not needed */ }
 
