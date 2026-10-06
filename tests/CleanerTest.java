@@ -77,6 +77,35 @@ public final class CleanerTest {
         // Documented limitation, pinned here so a future change is a decision:
         eq("bare-digit gutter stays", "escapes +\n 4 borders", Cleaner.clean("escapes +\n 4 borders"));
 
+        // herdr's LETTER counters: "z✓ │" / "L○ │" - a letter with a check or a circle after
+        // it. The bar is optional there, because the letter+marker is the discriminator and
+        // the bar is the first thing a copy drops. The digit rule cannot see these at all.
+        eq("letter+check gutter", "it's the only way",
+           Cleaner.clean("z\u2713 \u2502 it's the only way"));
+        eq("letter+circle gutter", "op=clip takes effect",
+           Cleaner.clean("L\u25cb \u2502 op=clip takes effect"));
+        eq("letter gutter without the bar", "startup.", Cleaner.clean("L\u25cb startup."));
+        eq("letter gutter after a scroll marker", "text", Cleaner.clean("\u25bez\u2713\u2502 text"));
+        // 4+ letters is a word, not a counter: the rule is capped at three. (A check is
+        // used, not a circle, because a circle is box debris and stripBox removes it anyway.)
+        eq("a word before a check stays", "This\u2713 stays", Cleaner.clean("This\u2713 stays"));
+
+        // A second pane's gutter lands mid-line when the copy spanned two panes side by
+        // side. The real copy had a 47-space run before the counter; two is the threshold.
+        eq("second pane's gutter mid-line", "a) - b",
+           Cleaner.clean("a)          4\u25cb\u2502 - b"));
+        // A lone inline bar (no counter) is ordinary box debris: cut, and the gap collapses.
+        eq("an inline bar with no counter is debris", "a) b",
+           Cleaner.clean("a)          \u2502 b"));
+
+        // A line whose box chars are one leading run is a rule with content after it, not
+        // chrome - the content survives. A title bar interleaves box chars with words, so
+        // it is still dropped.
+        eq("leading rule keeps its content", "Two notes: keep me",
+           Cleaner.clean("\u2500\u2500\u2500\u2502 Two notes: keep me"));
+        eq("title bar still goes", "keep",
+           Cleaner.clean("\u250c\u2500 herdr \u2500 pop \u2500\u2500\u2510\nkeep"));
+
         // unwrap guards
         eq("unwrap keeps lists", "- a\n- b", Cleaner.clean("- a\n- b", true));
         eq("unwrap keeps indented code", "foo(arg1,\n    arg2);", Cleaner.clean("foo(arg1,\n    arg2);", true));

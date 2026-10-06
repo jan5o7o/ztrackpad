@@ -27,12 +27,24 @@ Nothing yet.
 
   **copy** writes the result back to the clipboard so it can be pasted straight into Termux,
   and closes. Hold **clean** to also unwrap terminal-wrapped lines (the guarded join; blunter
-  than it sounds, hence the hidden long-press). The modal is 70% of the screen wide and as
-  tall as its text needs, up to a cap (past that the textarea scrolls), and it is centred so a
-  keyboard never covers it. Tap the text to edit it with the system keyboard; the keys panel
-  types into it too.
+  than it sounds, hence the hidden long-press). The text sits in a darker bordered box inside
+  the modal; the modal is 70% of the screen wide and as tall as its text needs, up to a cap
+  (past that the textarea scrolls), and it is centred so a keyboard never covers it. Tap the
+  text to edit it with the system keyboard; the keys panel types into it too.
+- **The cleaner learned two more shapes, from a real copy** (`z✓ │`, `L○ │` and a two-pane
+  line, all measured):
+  - **herdr's LETTER counters.** A letter with a circle or a check after it is a row counter,
+    like the digit form — `z✓ │`, `L○ │`, and with the pane bar already gone, `L○ startup.`.
+    Capped at three letters, so a word before a check (`This✓`) survives. The digit form still
+    requires the bar: a bare leading number stays, deliberately.
+  - **The second pane's gutter, mid-line.** When the copy spanned two panes side by side the
+    other pane's counter lands in the middle of the line (`... suite).     4○│ - End-to-end:
+    ...`); it is now replaced with a single space instead of leaving `4○` behind.
+  - **A rule no longer eats the sentence after it.** A line whose box chars are one leading
+    run (`───│ Two notes: ...`) is a horizontal rule, not chrome, so the rule goes and the
+    text stays. Title bars still go: they interleave box chars with words.
 - The cleaner itself is a **pure-Java class with no Android imports**, so `tests/cleaner.sh`
-  compiles and runs it with plain `javac`/`java` — no platform jar, 34 checks. The same file
+  compiles and runs it with plain `javac`/`java` — no platform jar, 43 checks. The same file
   is what the modal calls, so the tested transform and the shipped one cannot drift.
 - **Scriptable**: `vdisplay clip [show|hide|toggle|read|clean|copy|junk on|off|join on|off]`,
   plus `clip-set '<text>'` to put text on the clipboard. `status` gained `clip=`, `clipdot=`

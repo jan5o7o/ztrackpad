@@ -120,6 +120,20 @@ public final class Cleaner {
             || (c >= 0x2596 && c <= 0x25ff);  // (covered above) geometric debris incl. shades
     }
 
+    /**
+     * True when every box char in the line sits in one run at its start - i.e. the line is a
+     * rule with content after it, not a title bar with words among the box chars.
+     */
+    private static boolean leadingBoxRun(String line) {
+        int i = 0;
+        while (i < line.length() && boxChar(line.charAt(i))) i++;
+        if (i == 0) return false;
+        for (int j = i; j < line.length(); j++) {
+            if (boxChar(line.charAt(j))) return false;
+        }
+        return true;
+    }
+
     private static boolean junkOnly(String line) {
         if (line.isEmpty()) return false;   // an empty line is not box junk; stripBox
                                             // used to eat every blank line through here
@@ -133,7 +147,12 @@ public final class Cleaner {
     }
 
     /** Border-only lines vanish; pane title bars (>= 3 box chars, e.g. "┌─ herdr ─ pop ─┐")
-     *  vanish; content lines keep their text but lose the box chars. */
+     *  vanish; content lines keep their text but lose the box chars.
+     *
+     *  The one exception is a line whose box chars are a single LEADING run: that is a
+     *  horizontal rule with content after it ("───│ Two notes: ..."), not chrome, so the
+     *  rule goes and the text stays. A title bar interleaves its box chars with words, which
+     *  is what tells the two apart. */
     public static String stripBox(String s) {
         String[] lines = s.split("\n", -1);
         StringBuilder out = new StringBuilder(s.length());
@@ -142,7 +161,7 @@ public final class Cleaner {
             if (!line.isEmpty() && junkOnly(line)) continue;      // a border
             int box = 0;
             for (int j = 0; j < line.length(); j++) if (boxChar(line.charAt(j))) box++;
-            if (box >= 3) continue;                               // a title bar: chrome
+            if (box >= 3 && !leadingBoxRun(line)) continue;       // a title bar: chrome
             if (out.length() > 0) out.append('\n');
             StringBuilder cut = new StringBuilder(line.length());
             for (int j = 0; j < line.length(); j++) {
@@ -162,21 +181,40 @@ public final class Cleaner {
 
     // ---------------------------------------------------------------- gutter
 
-    /** Zellij (and friends) draw a line-number gutter over the leftmost columns of every
-     *  display row: scroll marker, digits, a fill/open circle, then the pane border.
+    /** Zellij and herdr draw a gutter over the leftmost columns of every display row: a
+     *  scroll marker, a row counter, a fill/open circle, then the pane border. herdr counts
+     *  with LETTERS as well as digits - "z✓ │", "L○ │", a letter with a check or a circle
+     *  after it - which is what a copy out of one of its panes leaves for the rows its
+     *  counter labels rather than numbers.
+     *
      *  When the wrapped line ran under the gutter its first word is gone for good - the
      *  gutter replaced it on screen, so no rule can bring it back. Everything else
      *  survives: " 4○│ borders)" -> "borders)". */
     public static String stripGutter(String s) {
-        return GUTTER.matcher(s).replaceAll("");
+        // leading gutters first (they are anchored), then the second pane's gutter, which
+        // lands mid-line when the copy spanned two panes side by side
+        return GUTTER_INLINE.matcher(GUTTER.matcher(s).replaceAll("")).replaceAll(" ");
     }
 
-    // \s* then at least one of marker / digits / circle before the border bar; a bare
-    // "│" also matches (it is box debris anyway). Indented content without the bar is
-    // untouched, so code indentation can never be eaten here.
+    // Two leading shapes, because herdr counts with both:
+    //   <marker?> <digits?> <circle?> │   - the digit gutter; the bar is REQUIRED, because a
+    //                                       bare leading number is real content too often
+    //   <marker?> <letters> <circle|check> - the letter gutter; the bar is OPTIONAL, because a
+    //                                       letter glued to ○/●/✓ is not prose and the bar is
+    //                                       the first thing a copy drops
+    // Content matching neither is untouched, so code indentation can never be eaten here.
     private static final java.util.regex.Pattern GUTTER = java.util.regex.Pattern.compile(
-        "^[ \\t]*(?:[\\u25be\\u25b8]\\s*)?(?:\\d+\\s*)?[\\u25cb\\u25cf]?\\u2502\\s*",
+        "^[ \\t]*(?:[\\u25be\\u25b8]\\s*)?(?:\\d+\\s*)?[\\u25cb\\u25cf]?\\s*\\u2502\\s*"
+            + "|^[ \\t]*(?:[\\u25be\\u25b8]\\s*)?[A-Za-z]{1,3}\\s*"
+            + "[\\u25cb\\u25cf\\u25d0\\u25d1\\u2713\\u2714]\\s*(?:\\u2502\\s*)?",
         java.util.regex.Pattern.MULTILINE);
+
+    // A second pane's gutter lands mid-line when the copy spanned two panes side by side:
+    // "... suite).            4○│ - End-to-end: ...". Two or more spaces, a circle and the
+    // pane bar is unmistakable, so it goes - replaced with one space so the two halves stay
+    // separate words. The circle is required, or a markdown table's "a   │ b" would be joined.
+    private static final java.util.regex.Pattern GUTTER_INLINE = java.util.regex.Pattern.compile(
+        "[ \\t]{2,}(?:\\d+\\s*)?[\\u25cb\\u25cf]\\s*\\u2502\\s*");
 
     // ---------------------------------------------------------------- unwrap
 

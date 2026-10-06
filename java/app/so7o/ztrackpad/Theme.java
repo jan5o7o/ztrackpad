@@ -54,6 +54,8 @@ final class Theme {
     int panelStroke;      // their border
     int panelHead;        // drag handles
     int panelBody;        // the pad's touch surface
+    int fieldBg;          // the clipboard textarea's box - recessed against panelSolid
+    int fieldStroke;      // its border
     int panelBar;         // the pad's button row
     int panelKeys;        // the pad's arrow row
     int padContainer;     // the pad's outer fill
@@ -114,6 +116,8 @@ final class Theme {
         DEFAULT.panelStroke = 0x66FFFFFF;
         DEFAULT.panelHead = 0x33FFFFFF;
         DEFAULT.panelBody = 0x1AFFFFFF;
+        DEFAULT.fieldBg = 0xE6000000;
+        DEFAULT.fieldStroke = 0x4DFFFFFF;
         DEFAULT.panelBar = 0x33FFFFFF;
         DEFAULT.panelKeys = 0x22FFFFFF;
         DEFAULT.padContainer = 0x66000000;
@@ -154,6 +158,8 @@ final class Theme {
         DARK.panelStroke = 0x40FFFFFF;
         DARK.panelHead = 0xFF1C1C22;
         DARK.panelBody = 0xFF15151A;
+        DARK.fieldBg = 0xFF000000;
+        DARK.fieldStroke = 0x33FFFFFF;
         DARK.panelBar = 0xFF1C1C22;
         DARK.panelKeys = 0xFF191920;
         DARK.padContainer = 0xFF0B0B0F;
@@ -194,6 +200,8 @@ final class Theme {
         LIGHT.panelStroke = 0x33000000;
         LIGHT.panelHead = 0xFFE4E4EA;
         LIGHT.panelBody = 0xFFFFFFFF;
+        LIGHT.fieldBg = 0xFFE8E8EE;
+        LIGHT.fieldStroke = 0x22000000;
         LIGHT.panelBar = 0xFFEDEDF2;
         LIGHT.panelKeys = 0xFFF2F2F6;
         LIGHT.padContainer = 0xF2FFFFFF;
@@ -235,6 +243,8 @@ final class Theme {
         CONTRAST.panelStroke = 0xFFFFFFFF;
         CONTRAST.panelHead = 0xFF141414;
         CONTRAST.panelBody = 0xFF000000;
+        CONTRAST.fieldBg = 0xFF000000;
+        CONTRAST.fieldStroke = 0xA6FFFFFF;
         CONTRAST.panelBar = 0xFF141414;
         CONTRAST.panelKeys = 0xFF141414;
         CONTRAST.padContainer = 0xFF000000;
@@ -275,6 +285,8 @@ final class Theme {
         GLASS.panelStroke = 0x26FFFFFF;
         GLASS.panelHead = 0x14FFFFFF;
         GLASS.panelBody = 0x0AFFFFFF;
+        GLASS.fieldBg = 0x1A000000;
+        GLASS.fieldStroke = 0x26FFFFFF;
         GLASS.panelBar = 0x14FFFFFF;
         GLASS.panelKeys = 0x0FFFFFFF;
         GLASS.padContainer = 0x14000000;

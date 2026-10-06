@@ -299,6 +299,12 @@ pixels to composite, so it fails cleanly.
   unfocused and fires the moment the modal takes focus (measured both ways). The dot is
   therefore always present when enabled, the text is read when the modal opens, and
   `clipready=` reports whether a delivery has ever been seen.
+- **The clipboard modal's textarea sits in a box of its own** - `fieldBg` fill (darker than
+  `panelSolid`, recessed) with a `fieldStroke` border, `CLIP_FIELD_PAD_DP` of padding inside
+  it and `CLIP_FIELD_MARGIN_DP` of margin around it. The EditText carries no padding and no
+  background; the box owns both. `fitClipPanel` has to subtract *both* (margin + padding) when
+  it computes the text width, or the text wraps differently from the `StaticLayout` that
+  measured it and the window comes out the wrong height.
 - **The modal's height is measured, not guessed** (`clipTextHeight` lays the text out with a
   `StaticLayout`, `fitClipPanel` sizes the window): an overlay window has a fixed height, and
   the requirement is 70% of the screen wide and as tall as the text needs, capped at
@@ -312,6 +318,25 @@ pixels to composite, so it fails cleanly.
 - **`Cleaner` must stay android-free.** It is the tested transform, and `tests/cleaner.sh`
   compiles it with plain `javac`; an `android.*` import there breaks that test silently. New
   junk class = new named static method + a case in `tests/CleanerTest.java`.
+- **The `Cleaner`'s rules, and the order they must run in.** `stripAnsi` -> `stripControl` ->
+  `stripInvisible` -> `stripGutter` -> `stripBox` -> `normaliseSpaces` -> `tidyLines`
+  (+ opt-in `unwrap`). Two of those orderings are load-bearing:
+  - **The gutter runs BEFORE the box rules.** The gutter's own marks are box-range chars
+    (`○` `●` `│`), so the box rules would cut them first and the pattern would never match.
+  - **Two gutter shapes.** A *digit* counter requires the pane bar (` 4○│`, `▾3●│`) - a bare
+    leading number is real content too often, and that limitation is pinned by a test. A
+    *letter* counter does not (`z✓ │`, `L○ │`, `L○ startup.`): herdr labels some rows with a
+    letter and a circle or check after it, a letter glued to `○`/`●`/`✓`/`✔` is not prose,
+    and the bar is the first thing a copy drops. The letter form is capped at three letters,
+    so a word before a check (`This✓`) survives.
+  - **A second pane's gutter lands mid-line** when the copy spanned two panes side by side
+    (`GUTTER_INLINE`: 2+ spaces, digits, a circle, the bar -> one space). The circle is
+    required, or a markdown table's `a   │ b` would be joined.
+  - **`>= 3` box chars are chrome and dropped - unless they are one LEADING run**
+    (`leadingBoxRun`). That run is a horizontal rule with content after it (`───│ Two notes:
+    ...`), so the rule goes and the text stays; a title bar interleaves box chars with words,
+    which is what still tells the two apart. Before this, a rule silently ate the sentence
+    after it - measured on a real clipboard copy.
 - **What `clean` does is two persisted checkboxes, not a fixed pipeline**: `clean junk`
   (`Cleaner.clean`) and `remove new lines` (`joinClipLines` - every `\n` becomes a space, runs
   of spaces collapse to one, then trim). Neither is applied on open: the raw copy is what you
@@ -551,8 +576,15 @@ this list honest — do not move rows up without actually re-testing.
   stripped 112 chars to 67. The smoke test pins and restores both options, because they are
   persisted - an earlier run's `join on` leaked into the next run and made the flatten check
   read `1 -> 1`.
+- **The cleaner against the owner's real clipboard copy** (729 bytes of a herdr pane that
+  spanned two columns, 2026-10-06): `clip clean` took it 677 -> 574 chars, and the cleaned text
+  read back through `termux-clipboard-get` held exactly the prose - `z✓ │` and `L○ │` gone, the
+  mid-line `4○│` replaced by a space (`suite). - End-to-end:`), and the `───│ Two notes: ...`
+  sentence kept. Before the letter rule those two lines kept a stray `z✓` / `L`, and the rule
+  line was dropped whole, losing the sentence after it.
 - **The modal's geometry is exact**, measured from `dumpsys window`: the panel is
-  `(272,877)(1268x422)` on a 1812x2176 display (1268 = 0.7 x 1812, centred) and the `✂` dot is
+  `(272,817)(1268x541)` on a 1812x2176 display (1268 = 0.7 x 1812, centred; the height grew
+  from 422 when the textarea got its padded box) and the `✂` dot is
   `(18,1414)(99x99)` = `dp(8)` / 0.65 x 2176 / `dp(44)`.
 - **Editing works from both inputs**: `vdisplay type XYZ` - the same Shizuku key path the keys
   panel uses - took the textarea from 87 to 90 chars, and tapping the textarea made the system

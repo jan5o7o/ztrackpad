@@ -382,13 +382,15 @@ than merely designed. *No clip yet* — see [Features](#features).
 Copy a chunk of terminal session — a herdr pane, a zellij view, anything that went through a
 screen — and the `✂` dot opens a modal with the text in an editable box. **clean** applies
 whatever the two checkboxes say: **clean junk** strips what a terminal copy carries (ANSI
-escapes, box-drawing pane borders and title bars, zellij line gutters, control characters,
-zero-width and bidi marks, exotic spaces, the padding a `\r` redraw leaves behind) while
-leaving code indentation alone, and **remove new lines** turns line breaks into single spaces
-for when the paste has to be one line. Both are remembered. **copy** puts the result back on
-the clipboard, ready to paste into Termux. The modal is 70% of the screen wide and as tall as
-its text needs, so a short clip is a short box. The cleaner is the pure-Java `Cleaner` (no
-Android imports), unit-tested by `tests/cleaner.sh` — 34 checks, runnable without the
+escapes, box-drawing pane borders and title bars, line gutters — both herdr's digit counters
+like ` 4○│` and its letter ones like `z✓ │`, plus the second pane's gutter when a copy spans
+two panes side by side — control characters, zero-width and bidi marks, exotic spaces, the
+padding a `\r` redraw leaves behind) while leaving code indentation alone, and **remove new
+lines** turns line breaks into single spaces for when the paste has to be one line. Both are
+remembered. **copy** puts the result back on the clipboard, ready to paste into Termux. The
+text sits in a darker bordered box inside the modal, which is 70% of the screen wide and as
+tall as its text needs, so a short clip is a short box. The cleaner is the pure-Java `Cleaner`
+(no Android imports), unit-tested by `tests/cleaner.sh` — 43 checks, runnable without the
 platform jar.
 
 ### Scriptable, if you would rather not tap
@@ -402,12 +404,13 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
 - Real `SOURCE_MOUSE` injection via Shizuku for hover/click/drag — this is what
   lets a window actually be moved, which `dispatchGesture` cannot do reliably
 - Shizuku is used when ready, with accessibility `dispatchGesture` fallback
-- **Clipboard modal** (`✂` dot): reads the system clipboard into an editable textarea and
-  **clean** applies the two checkboxes — **clean junk** (the artifacts a copy out of a terminal
-  picks up: ANSI, pane borders and title bars, zellij gutters, invisibles, stray padding) and
-  **remove new lines** (line breaks become single spaces). **copy** writes the result back to
-  the clipboard. Hold **clean** to also unwrap terminal-wrapped lines. 70% of the screen wide,
-  as tall as its text. On by default; switchable from CONTROLS.
+- **Clipboard modal** (`✂` dot): reads the system clipboard into an editable textarea sitting
+  in a darker bordered box, and **clean** applies the two checkboxes — **clean junk** (the
+  artifacts a copy out of a terminal picks up: ANSI, pane borders and title bars, digit *and*
+  letter line gutters, invisibles, stray padding) and **remove new lines** (line breaks become
+  single spaces). **copy** writes the result back to the clipboard. Hold **clean** to also
+  unwrap terminal-wrapped lines. 70% of the screen wide, as tall as its text. On by default;
+  switchable from CONTROLS.
 - **Floating-window list** (`▤`): every window on the display in one place — the full-screen app
   first, then each floating window, front-most first. Tap a row to raise it, so a window that is
   hidden behind another (or minimized) comes back; tapping the full-screen row minimizes whatever

@@ -250,6 +250,9 @@ public class TrackpadService extends AccessibilityService {
     private static final float CLIP_TEXT_MAX_H_FRAC = 0.55f;
     /** How long the modal is given to acquire window focus before the clipboard is read. */
     private static final long CLIP_SETTLE_MS = 120L;
+    /** The textarea sits in a bordered, padded box, inset from the modal's edges. */
+    private static final int CLIP_FIELD_PAD_DP = 10;
+    private static final int CLIP_FIELD_MARGIN_DP = 10;
 
     /**
      * Started on a freshly created display so it has content of its own.
@@ -4525,6 +4528,16 @@ public class TrackpadService extends AccessibilityService {
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(34)));
 
         clipScroll = new ScrollView(this);
+        // A recessed box for the text: darker than the panel, bordered, and padded, so the
+        // text never touches the frame. The EditText carries no padding and no background of
+        // its own - the box owns both.
+        GradientDrawable field = new GradientDrawable();
+        field.setCornerRadius(Math.max(dp(6), dp(theme.radius / 2f)));
+        field.setColor(fill(theme.fieldBg));
+        field.setStroke(dp(1f), theme.fieldStroke);
+        clipScroll.setBackground(field);
+        clipScroll.setPadding(dp(CLIP_FIELD_PAD_DP), dp(CLIP_FIELD_PAD_DP),
+                dp(CLIP_FIELD_PAD_DP), dp(CLIP_FIELD_PAD_DP));
         clipEdit = new EditText(this);
         clipEdit.setTextSize(13f);
         clipEdit.setTypeface(Typeface.MONOSPACE);
@@ -4540,7 +4553,7 @@ public class TrackpadService extends AccessibilityService {
         // keeps a keyboard from covering the screen every time the modal opens.
         clipEdit.setShowSoftInputOnFocus(true);
         clipEdit.setHorizontallyScrolling(false);
-        clipEdit.setPadding(dp(10), dp(8), dp(10), dp(8));
+        clipEdit.setPadding(0, 0, 0, 0);
         clipEdit.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
@@ -4548,8 +4561,13 @@ public class TrackpadService extends AccessibilityService {
         });
         clipScroll.addView(clipEdit, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
-        content.addView(clipScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(120)));
+        LinearLayout.LayoutParams fieldLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(120));
+        fieldLp.leftMargin = dp(CLIP_FIELD_MARGIN_DP);
+        fieldLp.rightMargin = dp(CLIP_FIELD_MARGIN_DP);
+        fieldLp.topMargin = dp(CLIP_FIELD_MARGIN_DP);
+        fieldLp.bottomMargin = dp(CLIP_FIELD_MARGIN_DP);
+        content.addView(clipScroll, fieldLp);
 
         TextView hint = new TextView(this);
         hint.setText("tap the text to edit \u00b7 copy puts it back on the clipboard");
@@ -4845,7 +4863,7 @@ public class TrackpadService extends AccessibilityService {
     private void fitClipPanel() {
         if (clipPanel == null || clipEdit == null || clipPanelLp == null) return;
         int w = clipPanelWidth();
-        int textW = w - dp(20);
+        int textW = w - 2 * dp(CLIP_FIELD_MARGIN_DP + CLIP_FIELD_PAD_DP);
         int textH = clipTextHeight(clipEdit.getText(), textW,
                 (int) (screenH * CLIP_TEXT_MAX_H_FRAC));
         LinearLayout.LayoutParams slp = (LinearLayout.LayoutParams) clipScroll.getLayoutParams();
@@ -4853,7 +4871,7 @@ public class TrackpadService extends AccessibilityService {
             slp.height = textH;
             clipScroll.setLayoutParams(slp);
         }
-        int total = dp(34) + textH + dp(20) + dp(28) + dp(46);
+        int total = dp(34) + 2 * dp(CLIP_FIELD_MARGIN_DP) + textH + dp(20) + dp(28) + dp(46);
         total = Math.min(total, (int) (screenH * 0.92f));
         clipPanelLp.width = w;
         clipPanelLp.height = total;
@@ -4873,7 +4891,7 @@ public class TrackpadService extends AccessibilityService {
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                 .setIncludePad(false)
                 .build();
-        return Math.max(dp(48), Math.min(sl.getHeight() + dp(16), maxPx));
+        return Math.max(dp(48), Math.min(sl.getHeight() + 2 * dp(CLIP_FIELD_PAD_DP), maxPx));
     }
 
     private String clipStateLine() {
