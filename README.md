@@ -377,6 +377,20 @@ option. *No clip yet* — see
 A click aimed under a panel still reaches the app beneath it, measured in split screen rather
 than merely designed. *No clip yet* — see [Features](#features).
 
+### A clipboard that arrives pre-cleaned
+
+Copy a chunk of terminal session — a herdr pane, a zellij view, anything that went through a
+screen — and the `✂` dot opens a modal with the text in an editable box. **clean** applies
+whatever the two checkboxes say: **clean junk** strips what a terminal copy carries (ANSI
+escapes, box-drawing pane borders and title bars, zellij line gutters, control characters,
+zero-width and bidi marks, exotic spaces, the padding a `\r` redraw leaves behind) while
+leaving code indentation alone, and **remove new lines** turns line breaks into single spaces
+for when the paste has to be one line. Both are remembered. **copy** puts the result back on
+the clipboard, ready to paste into Termux. The modal is 70% of the screen wide and as tall as
+its text needs, so a short clip is a short box. The cleaner is the pure-Java `Cleaner` (no
+Android imports), unit-tested by `tests/cleaner.sh` — 34 checks, runnable without the
+platform jar.
+
 ### Scriptable, if you would rather not tap
 
 `am broadcast` drives the virtual display, the keys layout and the pad lock, so the app can be
@@ -388,6 +402,12 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
 - Real `SOURCE_MOUSE` injection via Shizuku for hover/click/drag — this is what
   lets a window actually be moved, which `dispatchGesture` cannot do reliably
 - Shizuku is used when ready, with accessibility `dispatchGesture` fallback
+- **Clipboard modal** (`✂` dot): reads the system clipboard into an editable textarea and
+  **clean** applies the two checkboxes — **clean junk** (the artifacts a copy out of a terminal
+  picks up: ANSI, pane borders and title bars, zellij gutters, invisibles, stray padding) and
+  **remove new lines** (line breaks become single spaces). **copy** writes the result back to
+  the clipboard. Hold **clean** to also unwrap terminal-wrapped lines. 70% of the screen wide,
+  as tall as its text. On by default; switchable from CONTROLS.
 - **Floating-window list** (`▤`): every window on the display in one place — the full-screen app
   first, then each floating window, front-most first. Tap a row to raise it, so a window that is
   hidden behind another (or minimized) comes back; tapping the full-screen row minimizes whatever
@@ -401,7 +421,7 @@ part of a script. *No clip yet* — see [Scripting it](#scripting-it).
   `vdisplay keys '<spec>'`. Format and examples in `skills/ztrackpad-vdisplay/SKILL.md`, and the
   gear dot switches the panel between the built-in keyboard and your own spec.
 - **A CONTROLS panel in the pad** (the gear dot, outermost on the right): the keys choice above,
-  on/off switches for the `⌨` and `▤` dots, a **Flick to scroll** switch that trades the
+  on/off switches for the `⌨`, `▤` and `✂` dots, a **Flick to scroll** switch that trades the
   strips' live scroll for Lite's bank-on-release feel, a **Show scroll marks** switch for the
   dotted strip markers, and links to the keys guide and the
   issue tracker.
@@ -594,11 +614,14 @@ adb shell am broadcast -n app.so7o.ztrackpad/.VDisplayReceiver \
 
 Ops: `status` | `create` [headless] [`--w W --h H`] | `show` | `hide` | `destroy` | `launch
 <package-or-component>` [url] | `target [display-id|package]` | `shot [--name]` | `lock on|off|toggle` |
-`flick on|off` | `marks on|off` |
+`flick on|off` | `marks on|off` | `bubbles keys=on|off,tasks=on|off,clip=on|off` |
+`clip [show|hide|toggle|read|clean|copy]` (with `--es spec '<text>' --es arg set` to write the
+clipboard) |
 `keys [<spec>]` | `keys-reset`.
 The reply arrives as
 `Broadcast completed: result=0, data="shizuku=ready id=25 kind=floating window=shown
-surface=alive vsize=1245x1397 target=0 padlocked=false flick=off marks=on keys=default"`.
+surface=alive vsize=1245x1397 target=0 padlocked=false flick=off marks=on clip=hidden
+clipdot=on clipready=off keys=default"`.
 
 - **The `-n` component is required.** An implicit broadcast does not reach a
   manifest-declared receiver on API 26+, so `-a` alone silently does nothing.
@@ -621,6 +644,13 @@ surface=alive vsize=1245x1397 target=0 padlocked=false flick=off marks=on keys=d
 - **`marks on|off`** switches the pad's dotted edge-strip markers — the laptop-trackpad
   affordance that says where scrolling lives. Cosmetic, so it only redraws the pad; same
   setter as the CONTROLS row; `status` reports `marks=on|off`.
+- **`clip`** drives the clipboard modal without a finger: no argument reads its state back
+  (`panel=`, `ready=`, `junk=`, `join=`, `lines=`, `chars=`), `show`/`hide`/`toggle` open it,
+  `read` pulls the system clipboard in, `clean` runs the Cleaner, `copy` writes the text back
+  and closes, `junk on|off` and `join on|off` set the two checkboxes, and
+  `--es arg set --es spec '<text>'` puts text on the clipboard (which is how the smoke test
+  feeds it a junk specimen). `status` reports `clip=shown|hidden`, `clipdot=on|off` and
+  `clipready=on|off`.
 - **`launch` puts an app on the display** through the same Shizuku shell bridge the
   display was created with, so it works for headless displays too: `vdisplay launch
   com.android.settings`, or `vdisplay launch com.android.chrome --url '…'`.

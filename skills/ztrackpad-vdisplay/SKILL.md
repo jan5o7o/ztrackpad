@@ -39,6 +39,11 @@ scripts/vdisplay shot --name verify        # -> /data/local/tmp/verify.png
 scripts/vdisplay lock on                   # freeze the pad's position and size
 scripts/vdisplay flick on                  # edge strips bank the gesture, scroll on release
 scripts/vdisplay marks on                   # dotted lines where the edge scroll strips are
+scripts/vdisplay clip                     # clipboard modal: panel=/ready=/chars=
+scripts/vdisplay clip show                # open it (reads the clipboard once focused)
+scripts/vdisplay clip clean               # strip terminal junk from the text
+scripts/vdisplay clip copy                # put the text back on the clipboard, then close
+scripts/vdisplay clip-set 'some text'     # put text on the system clipboard
 ```
 
 Equivalent one-liners, if the script is unavailable:
@@ -69,7 +74,7 @@ so `status` reports the size that actually came up.
 `status` prints one line of `key=value` pairs:
 
 ```
-shizuku=ready id=25 kind=floating window=shown surface=alive vsize=1245x1397 target=0 padlocked=false flick=off marks=on keys=default
+shizuku=ready id=25 kind=floating window=shown surface=alive vsize=1245x1397 target=0 padlocked=false flick=off marks=on clip=hidden clipdot=on clipready=off keys=default
 ```
 
 | key | meaning |
@@ -84,7 +89,47 @@ shizuku=ready id=25 kind=floating window=shown surface=alive vsize=1245x1397 tar
 | `padlocked` | whether the trackpad refuses to move or resize |
 | `flick` | `on` or `off` — whether the edge strips bank the gesture and scroll once on release |
 | `marks` | `on` or `off` — whether the pad shows dotted lines where the edge strips are |
+| `clip` | `shown` or `hidden` — the clipboard modal's visibility |
+| `clipdot` | `on` or `off` — whether the `✂` clipboard dot exists |
+| `clipready` | `on` or `off` — whether a clipboard change has ever been *delivered* (only happens while ztrackpad holds focus; see below) |
 | `keys` | `default` or `custom` — whether the keys panel is the built-in layout |
+
+## The clipboard modal
+
+The `✂` dot opens a modal showing the system clipboard in an editable textarea, with
+**clean** (apply the checkboxes below the text), **copy** (write the text back to the
+clipboard and close) and **cancel**. The two checkboxes say what `clean` does: **clean junk**
+(the Cleaner) and **remove new lines** (line breaks become single spaces). Both are
+remembered. Hold **clean** to also unwrap terminal-wrapped lines. The modal is 70% of the
+screen wide and as tall as its text needs, up to a cap (then the textarea scrolls).
+
+```bash
+scripts/vdisplay clip                 # panel=shown|hidden ready=on junk=on join=off lines=4 chars=67
+scripts/vdisplay clip show            # open it (it reads the clipboard once focused)
+scripts/vdisplay clip read            # re-read the clipboard into the textarea
+scripts/vdisplay clip clean           # run the ticked transforms over the textarea
+scripts/vdisplay clip junk on|off     # the "clean junk" checkbox
+scripts/vdisplay clip join on|off     # the "remove new lines" checkbox
+scripts/vdisplay clip copy            # write the textarea back to the clipboard, then close
+scripts/vdisplay clip hide
+scripts/vdisplay clip-set '<text>'    # put text on the system clipboard (fires the dot)
+```
+
+Two platform facts shape this, and both are measured on this device:
+
+- **Reading the clipboard needs window focus.** Android's `ClipboardService` only lets an app
+  read when it owns the focused window, and there is no accessibility-service exemption —
+  shell cannot read it either. So the modal is the one **focusable** window in ztrackpad: it
+  takes focus while it is open (which is also what lets the keys panel type into the
+  textarea) and hands it back when it closes.
+- **`OnPrimaryClipChangedListener` only delivers to a focused app.** The callback never
+  arrives while the overlays are unfocused, and fires the moment the modal takes focus. A
+  background dot therefore cannot "appear on copy"; the `✂` dot is always there when
+  enabled, and the text is read when the modal opens. `clipready=` reports whether a
+  delivery has ever been seen.
+
+The keyboard stays down until you tap the textarea (`SOFT_INPUT_STATE_ALWAYS_HIDDEN`), so
+opening the modal never shoves a keyboard over the screen.
 
 ## Things worth knowing
 

@@ -3,6 +3,8 @@ package app.so7o.ztrackpad;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.animation.ValueAnimator;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -17,6 +19,7 @@ import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
@@ -29,7 +32,13 @@ import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.Layout;
+import android.text.StaticLayout;
+import android.text.TextPaint;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
@@ -45,6 +54,7 @@ import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.view.accessibility.AccessibilityEvent;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -217,6 +227,9 @@ public class TrackpadService extends AccessibilityService {
      */
     private static final String PREF_SHOW_KEYS_BUBBLE = "showKeysBubble";
     private static final String PREF_SHOW_TASKS_BUBBLE = "showTasksBubble";
+    private static final String PREF_SHOW_CLIP_BUBBLE = "showClipBubble";
+    private static final String PREF_CLIP_JUNK = "clipCleanJunk";
+    private static final String PREF_CLIP_JOIN = "clipJoinLines";
 
     /** Pref: edge-strip scrolls bank the gesture and spend it on release - see flickScroll. */
     private static final String PREF_FLICK_SCROLL = "flickScroll";
@@ -227,6 +240,16 @@ public class TrackpadService extends AccessibilityService {
     /** Opacity slider range, in percent. */
     private static final int OPACITY_MIN = 20;
     private static final int OPACITY_MAX = 100;
+
+    /**
+     * The clipboard modal: 70% of the screen wide, as tall as its text needs (capped).
+     * These live here rather than in the layout code so the one place that sizes the
+     * window and the one place that documents it cannot drift.
+     */
+    private static final float CLIP_W_FRAC = 0.70f;
+    private static final float CLIP_TEXT_MAX_H_FRAC = 0.55f;
+    /** How long the modal is given to acquire window focus before the clipboard is read. */
+    private static final long CLIP_SETTLE_MS = 120L;
 
     /**
      * Started on a freshly created display so it has content of its own.
@@ -329,6 +352,30 @@ public class TrackpadService extends AccessibilityService {
     // floating-window list (the "pop-up view" task switcher)
     private View tasksBubble, tasksPanel;
     private WindowManager.LayoutParams tasksBubbleLp, tasksPanelLp;
+
+    // clipboard modal: a dot that appears once something is copied, and the panel it opens
+    private View clipBubble, clipPanel;
+    private WindowManager.LayoutParams clipBubbleLp, clipPanelLp;
+    private EditText clipEdit;
+    private ScrollView clipScroll;
+    private boolean clipVisible = false;
+    /** False until a copy has been seen - the dot is hidden until then. */
+    private boolean clipReady = false;
+    private boolean showClipBubble = true;
+    /** Our own write-back must not be mistaken for a new copy. */
+    private boolean clipIgnoreChange = false;
+    /** Coalesces the re-measure a keystroke triggers. */
+    private boolean clipFitPosted = false;
+    /**
+     * What the modal's `clean` does, one switch per transform, both persisted so the
+     * choice sticks. "clean junk" is the Cleaner (terminal artifacts); "remove new lines"
+     * flattens line breaks into spaces. Neither is applied on open - the raw copy is what
+     * you are shown, and cleaning stays an explicit press.
+     */
+    private boolean clipCleanJunk = true;
+    private boolean clipJoinLines = false;
+    private TextView clipJunkBox, clipJoinBox;
+    private ClipboardManager clipboardManager;
     private LinearLayout tasksRows;
     private boolean tasksVisible = false;
     /** True while a list fetch is in flight, so taps cannot pile up shell round trips. */
@@ -439,6 +486,9 @@ public class TrackpadService extends AccessibilityService {
         keysMode = prefs.getString(PREF_KEYS_MODE, "full");
         showKeysBubble = prefs.getBoolean(PREF_SHOW_KEYS_BUBBLE, true);
         showTasksBubble = prefs.getBoolean(PREF_SHOW_TASKS_BUBBLE, true);
+        showClipBubble = prefs.getBoolean(PREF_SHOW_CLIP_BUBBLE, true);
+        clipCleanJunk = prefs.getBoolean(PREF_CLIP_JUNK, true);
+        clipJoinLines = prefs.getBoolean(PREF_CLIP_JOIN, false);
         flickScroll = prefs.getBoolean(PREF_FLICK_SCROLL, false);
         showScrollMarks = prefs.getBoolean(PREF_SHOW_SCROLL_MARKS, true);
         padLocked = prefs.getBoolean(PREF_LOCK, false);
@@ -454,6 +504,7 @@ public class TrackpadService extends AccessibilityService {
         if (CURSOR_ABOVE_PANELS) raise(cursor, cursorLp, "cursor");
         if (displayManager != null) displayManager.registerDisplayListener(displayListener, ui);
         VDisplayReceiver.service = this;
+        registerClipListener();
         startShizuku();
         Log.i(TAG, "connected surface=" + screenW + "x" + screenH
                 + " target=display " + targetDisplayId + " " + outW + "x" + outH
@@ -543,6 +594,8 @@ public class TrackpadService extends AccessibilityService {
             resnapBubble(bubble, bubbleLp, bubbleSide);
             resnapBubble(keysBubble, keysBubbleLp, keysBubbleSide);
             resnapBubble(tasksBubble, tasksBubbleLp, tasksBubbleSide);
+            resnapBubble(clipBubble, clipBubbleLp, clipBubbleSide);
+            if (clipVisible) fitClipPanel();
         }
     }
 
@@ -580,12 +633,14 @@ public class TrackpadService extends AccessibilityService {
         buildBubble();
         buildKeysBubble();
         buildTasksBubble();
+        buildClipBubble();
         buildCursor();
         buildPad();
         buildKeysPanel();
         buildPickerPanel();
         buildControlsPanel();
         buildTasksPanel();
+        buildClipPanel();
         buildThemePanel();
     }
 
@@ -608,6 +663,7 @@ public class TrackpadService extends AccessibilityService {
         boolean screenWas = (screenPanel != null && screenPanel.getVisibility() == View.VISIBLE);
         boolean tasksWas = tasksVisible;
         boolean controlsWas = controlsVisible;
+        boolean clipWas = clipVisible;
 
         // persist geometry first, or the rebuild would fall back to the defaults
         saveGeometry(padLp, PAD_KEY);
@@ -629,6 +685,7 @@ public class TrackpadService extends AccessibilityService {
         setThemeVisible(themeWas);
         setTasksVisible(tasksWas);
         setControlsVisible(controlsWas);
+        setClipVisible(clipWas);
 
         raise(pad, padLp, "pad");
         if (CURSOR_ABOVE_PANELS) raise(cursor, cursorLp, "cursor");
@@ -650,6 +707,7 @@ public class TrackpadService extends AccessibilityService {
         restyleBubble(bubble, theme.bubbleTrack);
         restyleBubble(keysBubble, theme.bubbleKeys);
         restyleBubble(tasksBubble, theme.bubbleTasks);
+        restyleBubble(clipBubble, theme.bubbleClip);
     }
 
     private void restyleBubble(View v, int textColor) {
@@ -839,17 +897,21 @@ public class TrackpadService extends AccessibilityService {
         try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) {}
         try { if (keysBubble != null) wm.removeView(keysBubble); } catch (Exception ignored) {}
         try { if (tasksBubble != null) wm.removeView(tasksBubble); } catch (Exception ignored) {}
+        try { if (clipBubble != null) wm.removeView(clipBubble); } catch (Exception ignored) {}
         try { if (controlsPanel != null) wm.removeView(controlsPanel); } catch (Exception ignored) {}
         try { if (pad != null) wm.removeView(pad); } catch (Exception ignored) {}
         try { if (keysPanel != null) wm.removeView(keysPanel); } catch (Exception ignored) {}
         try { if (pickerPanel != null) wm.removeView(pickerPanel); } catch (Exception ignored) {}
         try { if (themePanel != null) wm.removeView(themePanel); } catch (Exception ignored) {}
         try { if (tasksPanel != null) wm.removeView(tasksPanel); } catch (Exception ignored) {}
+        try { if (clipPanel != null) wm.removeView(clipPanel); } catch (Exception ignored) {}
         try { if (screenPanel != null) wm.removeView(screenPanel); } catch (Exception ignored) {}
         try { if (cursor != null) wm.removeView(cursor); } catch (Exception ignored) {}
-        bubble = keysBubble = tasksBubble = pad = keysPanel = null;
-        pickerPanel = themePanel = screenPanel = tasksPanel = null;
+        bubble = keysBubble = tasksBubble = clipBubble = pad = keysPanel = null;
+        pickerPanel = themePanel = screenPanel = tasksPanel = clipPanel = null;
         controlsPanel = null;
+        clipEdit = null;
+        clipScroll = null;
         cursor = null;
         themeRows = null;
         opacityRows = null;
@@ -862,6 +924,7 @@ public class TrackpadService extends AccessibilityService {
         try { if (displayManager != null) displayManager.unregisterDisplayListener(displayListener); }
         catch (Exception ignored) {}
         removeTargetCursor();
+        unregisterClipListener();
         // a virtual display we created must not outlive the service
         try { if (shizuku != null) shizuku.releaseVirtualDisplay(); }
         catch (Exception ignored) {}
@@ -1666,6 +1729,7 @@ public class TrackpadService extends AccessibilityService {
             else return "error: controls wants show|hide|toggle";
             return "ok controls " + (controlsVisible ? "shown" : "hidden") + " keys-mode=" + keysMode
                     + " bubbles=keys:" + onOff(showKeysBubble) + ",tasks:" + onOff(showTasksBubble)
+                    + ",clip:" + onOff(showClipBubble)
                     + " flick=" + onOff(flickScroll) + " marks=" + onOff(showScrollMarks);
         }
 
@@ -1710,18 +1774,17 @@ public class TrackpadService extends AccessibilityService {
                 for (int i = 0; i < parts.length; i++) {
                     String one = parts[i].trim();
                     int eq = one.indexOf('=');
-                    if (eq < 0) return "error: bubbles wants keys=on|off,tasks=on|off";
+                    if (eq < 0) return "error: bubbles wants keys=on|off,tasks=on|off,clip=on|off";
                     String name = one.substring(0, eq).trim();
                     String val = one.substring(eq + 1).trim();
                     if (!"on".equals(val) && !"off".equals(val)) {
                         return "error: bubbles wants on|off, not '" + val + "'";
                     }
-                    if ("keys".equals(name)) setBubbleShown(true, "on".equals(val));
-                    else if ("tasks".equals(name)) setBubbleShown(false, "on".equals(val));
-                    else return "error: unknown dot '" + name + "' (keys|tasks)";
+                    setBubbleShown(name, "on".equals(val));
                 }
             }
-            return "ok bubbles keys=" + onOff(showKeysBubble) + " tasks=" + onOff(showTasksBubble);
+            return "ok bubbles keys=" + onOff(showKeysBubble) + " tasks=" + onOff(showTasksBubble)
+                    + " clip=" + onOff(showClipBubble);
         }
 
         // Floating ("pop-up view") windows. With no arg, list them; with an arg, drive the
@@ -1746,6 +1809,45 @@ public class TrackpadService extends AccessibilityService {
                         .append(':').append(r.fullscreen ? "fullscreen" : "floating");
             }
             return sb.toString();
+        }
+
+        // The clipboard modal, scriptable like every other panel so it can be opened,
+        // cleaned and copied without a finger. `spec` carries the text for `set`.
+        if ("clip".equals(op)) {
+            String what = (arg == null) ? "" : arg.trim();
+            if (what.length() == 0) return "ok " + clipStateLine();
+            if ("show".equals(what)) { setClipVisible(true); return "ok " + clipStateLine(); }
+            if ("hide".equals(what)) { setClipVisible(false); return "ok " + clipStateLine(); }
+            if ("toggle".equals(what)) { setClipVisible(!clipVisible); return "ok " + clipStateLine(); }
+            if ("read".equals(what)) {
+                readClipboard();
+                fitClipPanel();
+                return "ok " + clipStateLine();
+            }
+            if ("clean".equals(what)) { cleanClipText(false); return "ok " + clipStateLine(); }
+            if ("junk".equals(what)) {
+                if (spec == null || spec.length() == 0) return "ok " + clipStateLine();
+                if (!"on".equals(spec) && !"off".equals(spec)) {
+                    return "error: clip junk wants on|off";
+                }
+                setClipCleanJunk("on".equals(spec));
+                return "ok " + clipStateLine();
+            }
+            if ("join".equals(what)) {
+                if (spec == null || spec.length() == 0) return "ok " + clipStateLine();
+                if (!"on".equals(spec) && !"off".equals(spec)) {
+                    return "error: clip join wants on|off";
+                }
+                setClipJoinLines("on".equals(spec));
+                return "ok " + clipStateLine();
+            }
+            if ("copy".equals(what)) { copyClipText(); return "ok " + clipStateLine(); }
+            if ("set".equals(what)) {
+                String text = (spec == null) ? "" : spec;
+                setSystemClipboard(text);
+                return "ok clip set " + text.length() + " chars";
+            }
+            return "error: clip wants show|hide|toggle|read|clean|copy|set|junk|join";
         }
 
         // arg is a task id from `tasks`. This is the same code path a row tap takes, so a
@@ -1899,7 +2001,7 @@ public class TrackpadService extends AccessibilityService {
         }
 
         return "error: unknown op '" + op + "' (status|create|destroy|show|hide|lock|keys"
-                + "|keys-reset|keys-mode|flick|marks|bubbles|controls|tasks|taskfocus|launch|target|shot)";
+                + "|keys-reset|keys-mode|flick|marks|bubbles|clip|controls|tasks|taskfocus|launch|target|shot)";
     }
 
     /**
@@ -2047,6 +2149,9 @@ public class TrackpadService extends AccessibilityService {
                 + " padlocked=" + padLocked
                 + " flick=" + onOff(flickScroll)
                 + " marks=" + onOff(showScrollMarks)
+                + " clip=" + (clipVisible ? "shown" : "hidden")
+                + " clipdot=" + onOff(showClipBubble)
+                + " clipready=" + onOff(clipReady)
                 + " keys=" + ((keysSpec == null || keysSpec.length() == 0) ? "default" : "custom");
     }
 
@@ -4279,6 +4384,512 @@ public class TrackpadService extends AccessibilityService {
      * (0.45 of the screen height, so 55% up from the bottom) and directly ABOVE the keys
      * dot at 0.55 - so the left edge reads top to bottom as windows, then keys.
      */
+    // =========================================================================
+    // Clipboard modal
+    //
+    // ztrackpad's one focusable window, and it has to be. Android only lets an app read
+    // the clipboard when the app owns the focused window (ClipboardService
+    // .clipboardAccessAllowed -> WindowManagerInternal.isUidFocused). There is no
+    // accessibility-service exemption, and shell has no READ_CLIPBOARD_IN_BACKGROUND
+    // either, so an always-unfocused overlay could never show what it was told to show.
+    // Taking focus is also what lets the keys panel - which injects into the focused
+    // window - type straight into the textarea, and dismissing the modal hands focus back.
+    // =========================================================================
+
+    /**
+     * The clipboard changed. We deliberately do not read it here - a background read is
+     * denied - and on this platform the callback is only delivered at all while this app
+     * owns the focused window. So it is a diagnostic and a live refresh for the one case
+     * that works (the modal is open), never the thing the dot depends on.
+     */
+    private final ClipboardManager.OnPrimaryClipChangedListener clipListener =
+            new ClipboardManager.OnPrimaryClipChangedListener() {
+        @Override public void onPrimaryClipChanged() {
+            if (clipIgnoreChange) {
+                clipIgnoreChange = false;    // our own write-back, not a new copy
+                return;
+            }
+            ui.post(new Runnable() {
+                @Override public void run() {
+                    clipReady = true;
+                    setClipBubbleVisible(true);
+                    Log.i(TAG, "clipboard changed (focused) - clip dot shown");
+                }
+            });
+        }
+    };
+
+    private void registerClipListener() {
+        clipboardManager = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboardManager == null) { Log.w(TAG, "no clipboard service"); return; }
+        clipboardManager.addPrimaryClipChangedListener(clipListener);
+        Log.i(TAG, "clipboard listener registered");
+    }
+
+    private void unregisterClipListener() {
+        if (clipboardManager == null) return;
+        try { clipboardManager.removePrimaryClipChangedListener(clipListener); }
+        catch (Exception ignored) {}
+        clipboardManager = null;
+    }
+
+    private ClipboardManager clipboard() {
+        if (clipboardManager == null) {
+            clipboardManager = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        }
+        return clipboardManager;
+    }
+
+    private final BubbleSide clipBubbleSide = new BubbleSide(false);   // ✂ starts LEFT
+
+    private void buildClipBubble() {
+        if (!showClipBubble) { clipBubble = null; return; }
+        final int size = dp(44);
+        TextView v = new TextView(this);
+        // U+2702 + VS15. A bare dingbat can be picked up by the emoji font, and emoji
+        // ignore setTextColor (the same trap the padlock hit) - VS15 forces text
+        // presentation, which is what makes the theme colour stick.
+        v.setText("\u2702\uFE0E");
+        v.setTextColor(theme.bubbleClip);
+        v.setTextSize(19f);
+        v.setGravity(Gravity.CENTER);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(fill(theme.bubbleFill));
+        bg.setStroke(dp(1.5f), theme.bubbleStroke);
+        v.setBackground(bg);
+
+        clipBubbleLp = overlayLp(size, size,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+        clipBubbleLp.x = dp(8);                       // LEFT, under the ▤ windows dot
+        // below the ▤ (0.45) and the ⌨ (0.55): the left column reads windows, keys, clip
+        clipBubbleLp.y = (int) (screenH * 0.65f);
+
+        attachBubbleDrag(v, clipBubbleLp, clipBubbleSide, new Runnable() {
+            @Override public void run() { setClipVisible(!clipVisible); }
+        });
+
+        clipBubble = v;
+        try { wm.addView(clipBubble, clipBubbleLp); }
+        catch (Exception ex) { Log.e(TAG, "clipBubble", ex); }
+        setClipBubbleVisible(true);
+    }
+
+    /**
+     * Show or hide the clipboard dot.
+     *
+     * It is always visible when the feature is on - deliberately NOT "appears on copy".
+     * Android only delivers OnPrimaryClipChangedListener to an app that owns the focused
+     * window (measured on this device: the callback never arrives while the overlays are
+     * unfocused, and fires the moment the modal takes focus), and shell cannot read the
+     * clipboard either. So a background dot that waited for a copy would never appear.
+     * The dot is the affordance; the modal reads the clipboard when it opens.
+     */
+    private void setClipBubbleVisible(boolean visible) {
+        if (clipBubble == null) return;
+        clipBubble.setVisibility((showClipBubble && visible) ? View.VISIBLE : View.GONE);
+    }
+
+    private void buildClipPanel() {
+        FrameLayout container = new FrameLayout(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout title = new LinearLayout(this);
+        title.setGravity(Gravity.CENTER);
+        GradientDrawable tbg = new GradientDrawable();
+        tbg.setCornerRadii(new float[]{dp(theme.radius), dp(theme.radius),
+                dp(theme.radius), dp(theme.radius), 0, 0, 0, 0});
+        tbg.setColor(fill(theme.panelHead));
+        title.setBackground(tbg);
+        title.addView(makeChip("\u2702  CLIPBOARD \u2014 clean, then copy"));
+        title.setOnTouchListener(new View.OnTouchListener() {
+            private float dx, dy;
+            @Override public boolean onTouch(View view, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        dx = e.getRawX() - clipPanelLp.x;
+                        dy = e.getRawY() - clipPanelLp.y;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        clipPanelLp.x = (int) (e.getRawX() - dx);
+                        clipPanelLp.y = (int) (e.getRawY() - dy);
+                        try { wm.updateViewLayout(clipPanel, clipPanelLp); } catch (Exception ignored) {}
+                        return true;
+                }
+                return false;
+            }
+        });
+        content.addView(title, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(34)));
+
+        clipScroll = new ScrollView(this);
+        clipEdit = new EditText(this);
+        clipEdit.setTextSize(13f);
+        clipEdit.setTypeface(Typeface.MONOSPACE);
+        clipEdit.setTextColor(theme.textPrimary);
+        clipEdit.setBackgroundColor(0x00000000);
+        clipEdit.setGravity(Gravity.TOP | Gravity.START);
+        clipEdit.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        // The keys panel can type into it too (injection goes to the focused window), but
+        // the system keyboard is the obvious way to edit, so it is allowed - just not
+        // shown until the textarea is tapped (SOFT_INPUT_STATE_ALWAYS_HIDDEN below), which
+        // keeps a keyboard from covering the screen every time the modal opens.
+        clipEdit.setShowSoftInputOnFocus(true);
+        clipEdit.setHorizontallyScrolling(false);
+        clipEdit.setPadding(dp(10), dp(8), dp(10), dp(8));
+        clipEdit.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(Editable s) { scheduleClipFit(); }
+        });
+        clipScroll.addView(clipEdit, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+        content.addView(clipScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(120)));
+
+        TextView hint = new TextView(this);
+        hint.setText("tap the text to edit \u00b7 copy puts it back on the clipboard");
+        hint.setTextSize(10f);
+        hint.setTextColor(theme.textDim);
+        hint.setGravity(Gravity.CENTER);
+        content.addView(hint, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(20)));
+
+        // What `clean` will do. Two checkboxes rather than two more buttons: these are
+        // options for the one action, not actions of their own.
+        LinearLayout opts = new LinearLayout(this);
+        opts.setGravity(Gravity.CENTER);
+        clipJunkBox = modalCheck("clean junk", clipCleanJunk, new Runnable() {
+            @Override public void run() { setClipCleanJunk(!clipCleanJunk); }
+        });
+        clipJoinBox = modalCheck("remove new lines", clipJoinLines, new Runnable() {
+            @Override public void run() { setClipJoinLines(!clipJoinLines); }
+        });
+        opts.addView(clipJunkBox);
+        opts.addView(clipJoinBox);
+        content.addView(opts, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(28)));
+
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setGravity(Gravity.CENTER);
+        GradientDrawable bbg = new GradientDrawable();
+        bbg.setCornerRadii(new float[]{0, 0, 0, 0, dp(theme.radius), dp(theme.radius),
+                dp(theme.radius), dp(theme.radius)});
+        bbg.setColor(fill(theme.panelBar));
+        buttons.setBackground(bbg);
+        buttons.setPadding(dp(6), dp(4), dp(6), dp(6));
+        TextView clean = modalButton("clean", false, new Runnable() {
+            @Override public void run() { cleanClipText(false); }
+        });
+        // Hold clean to also unwrap terminal-wrapped lines - the transform the Cleaner
+        // keeps off by default, because it can join code at column 0.
+        clean.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) { tick(); cleanClipText(true); return true; }
+        });
+        buttons.addView(clean);
+        buttons.addView(modalButton("\u23CE copy", true, new Runnable() {
+            @Override public void run() { copyClipText(); }
+        }));
+        buttons.addView(modalButton("cancel", false, new Runnable() {
+            @Override public void run() { setClipVisible(false); }
+        }));
+        content.addView(buttons, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
+
+        container.addView(content, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        GradientDrawable rbg = new GradientDrawable();
+        rbg.setCornerRadius(dp(theme.radius));
+        rbg.setColor(fill(theme.panelSolid));
+        rbg.setStroke(dp(1.5f), theme.panelStroke);   // the modal's herdr-style border
+        container.setBackground(rbg);
+
+        // Deliberately WITHOUT FLAG_NOT_FOCUSABLE: this is the one window that must hold
+        // focus, for the clipboard read and for the keys panel to type into the textarea.
+        //  - NOT_TOUCH_MODAL: a focusable window that does not set it is modal and swallows
+        //    every touch outside its own bounds, which silently killed the clipboard dot
+        //    while the modal was open (measured);
+        //  - SOFT_INPUT_STATE_ALWAYS_HIDDEN: the window is focusable and the textarea is
+        //    editable, but the keyboard stays down until the text is actually tapped, so
+        //    opening the modal does not shove a keyboard over half the screen.
+        clipPanelLp = overlayLp(clipPanelWidth(), dp(240),
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+        clipPanelLp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN;
+        clipPanelLp.x = Math.max(0, (screenW - clipPanelLp.width) / 2);
+        clipPanelLp.y = Math.max(0, (screenH - clipPanelLp.height) / 2);
+        clipPanel = container;
+
+        try { wm.addView(clipPanel, clipPanelLp); }
+        catch (Exception ex) { Log.e(TAG, "clipPanel", ex); }
+        setClipVisible(false);
+    }
+
+    /**
+     * A herdr-style modal button: one filled primary, the rest neutral.
+     *
+     * The primary borrows the active-modifier key's pairing - accent fill, modTextOn ink -
+     * so no new Theme role is needed and a light preset still gets dark ink on a light fill.
+     */
+    private TextView modalButton(String label, boolean primary, final Runnable action) {
+        TextView t = new TextView(this);
+        t.setText(label);
+        t.setTextSize(13f);
+        t.setGravity(Gravity.CENTER);
+        t.setTextColor(primary ? theme.modTextOn : theme.textSecondary);
+        t.setBackground(keyBgState(primary ? theme.accent : theme.panelHead,
+                theme.keyStrokePressed));
+        t.setPadding(dp(14), 0, dp(14), 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT);
+        lp.leftMargin = dp(3);
+        lp.rightMargin = dp(3);
+        t.setLayoutParams(lp);
+        t.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { tick(); action.run(); }
+        });
+        return t;
+    }
+
+    private void setClipVisible(boolean visible) {
+        if (clipPanel == null) { clipVisible = false; return; }
+        clipVisible = visible;
+        if (visible) {
+            clipReady = true;
+            setClipBubbleVisible(true);
+            raise(clipPanel, clipPanelLp, "clipPanel");
+            clipPanel.setVisibility(View.VISIBLE);
+            // The read has to wait for the window to actually hold focus, which the
+            // window manager applies asynchronously - hence the posted read.
+            ui.postDelayed(new Runnable() {
+                @Override public void run() {
+                    readClipboard();
+                    fitClipPanel();
+                    if (clipEdit != null) clipEdit.requestFocus();
+                }
+            }, CLIP_SETTLE_MS);
+            // the pointer was raised over the pad; keep it above the modal too
+            if (CURSOR_ABOVE_PANELS) raise(cursor, cursorLp, "cursor");
+        } else {
+            clipPanel.setVisibility(View.GONE);
+        }
+        Log.i(TAG, "clip panel " + (visible ? "shown" : "hidden"));
+    }
+
+    /**
+     * Read the clipboard into the textarea.
+     *
+     * Only works while this window has focus (see the section comment). A null or empty
+     * read is reported honestly rather than shown as an empty document.
+     */
+    private void readClipboard() {
+        if (clipEdit == null) return;
+        ClipboardManager cm = clipboard();
+        if (cm == null || !cm.hasPrimaryClip()) {
+            clipEdit.setText("");
+            Log.i(TAG, "clip read: nothing on the clipboard");
+            return;
+        }
+        ClipData clip = cm.getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) {
+            clipEdit.setText("");
+            Log.w(TAG, "clip read denied (needs window focus)");
+            return;
+        }
+        CharSequence text = clip.getItemAt(0).coerceToText(this);
+        String s = (text == null) ? "" : text.toString();
+        clipEdit.setText(s);
+        clipEdit.setSelection(s.length());
+        Log.i(TAG, "clip read " + s.length() + " chars");
+    }
+
+    /**
+     * A checkbox for the modal: a ballot box, the label, and the theme's ink. The glyph
+     * carries VS15, because U+2611 has an emoji presentation and an emoji ignores
+     * setTextColor (the same trap the padlock hit).
+     */
+    private TextView modalCheck(String label, boolean on, final Runnable action) {
+        TextView t = new TextView(this);
+        t.setTextSize(11f);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(10), 0, dp(10), 0);
+        t.setBackground(keyBgState(0x00000000, theme.accent));
+        t.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { tick(); action.run(); }
+        });
+        styleCheck(t, label, on);
+        return t;
+    }
+
+    private void styleCheck(TextView t, String label, boolean on) {
+        if (t == null) return;
+        t.setText((on ? "\u2611\uFE0E  " : "\u2610\uFE0E  ") + label);
+        t.setTextColor(on ? theme.textPrimary : theme.textDim);
+    }
+
+    private void refreshClipChecks() {
+        styleCheck(clipJunkBox, "clean junk", clipCleanJunk);
+        styleCheck(clipJoinBox, "remove new lines", clipJoinLines);
+    }
+
+    private void setClipCleanJunk(boolean on) {
+        clipCleanJunk = on;
+        prefs.edit().putBoolean(PREF_CLIP_JUNK, on).apply();
+        refreshClipChecks();
+        Log.i(TAG, "clip clean junk -> " + on);
+    }
+
+    private void setClipJoinLines(boolean on) {
+        clipJoinLines = on;
+        prefs.edit().putBoolean(PREF_CLIP_JOIN, on).apply();
+        refreshClipChecks();
+        Log.i(TAG, "clip join lines -> " + on);
+    }
+
+    private void cleanClipText(boolean unwrap) {
+        if (clipEdit == null) return;
+        String before = clipEdit.getText().toString();
+        String after = before;
+        if (clipCleanJunk) after = Cleaner.clean(after, unwrap);
+        if (clipJoinLines) after = joinClipLines(after);
+        clipEdit.setText(after);
+        clipEdit.setSelection(after.length());
+        fitClipPanel();
+        Log.i(TAG, "clip clean junk=" + clipCleanJunk + " join=" + clipJoinLines
+                + (unwrap ? " unwrap" : "") + " " + before.length()
+                + " -> " + after.length() + " chars");
+    }
+
+    /**
+     * "remove new lines": every line break becomes a space, and the runs that leaves behind
+     * collapse to one, so a wrapped paste comes out as a single line. Indentation goes with
+     * it, which is why it is a checkbox and not the default.
+     */
+    private static String joinClipLines(String s) {
+        if (s == null) return "";
+        String joined = s.replace('\n', ' ');
+        StringBuilder out = new StringBuilder(joined.length());
+        boolean lastSpace = false;
+        for (int i = 0; i < joined.length(); i++) {
+            char c = joined.charAt(i);
+            if (c == ' ') {
+                if (lastSpace) continue;
+                lastSpace = true;
+            } else {
+                lastSpace = false;
+            }
+            out.append(c);
+        }
+        return out.toString().trim();
+    }
+
+    /** Put the (cleaned or edited) text back on the clipboard, then close the modal. */
+    private void copyClipText() {
+        if (clipEdit == null) return;
+        String s = clipEdit.getText().toString();
+        ClipboardManager cm = clipboard();
+        if (cm == null) { Log.w(TAG, "clip copy: no clipboard service"); return; }
+        clipIgnoreChange = true;   // our own write fires the change listener
+        ui.postDelayed(new Runnable() {
+            @Override public void run() {
+                // a write that never fired the listener must not mute the next real copy
+                clipIgnoreChange = false;
+            }
+        }, 1500L);
+        try {
+            cm.setPrimaryClip(ClipData.newPlainText("ztrackpad", s));
+            Log.i(TAG, "clip copy " + s.length() + " chars");
+        } catch (Throwable t) {
+            clipIgnoreChange = false;
+            Log.w(TAG, "clip copy failed: " + t);
+            return;
+        }
+        setClipVisible(false);
+        // Android 13+ shows its own "copied" overlay; adding one of ours would double it.
+    }
+
+    /** Write a string to the system clipboard (the `clip set` script path, and its test). */
+    private void setSystemClipboard(String text) {
+        ClipboardManager cm = clipboard();
+        if (cm == null) return;
+        try {
+            cm.setPrimaryClip(ClipData.newPlainText("ztrackpad", text == null ? "" : text));
+            Log.i(TAG, "clip set " + (text == null ? 0 : text.length()) + " chars");
+        } catch (Throwable t) {
+            Log.w(TAG, "clip set failed: " + t);
+        }
+    }
+
+    private int clipPanelWidth() {
+        return Math.max(dp(240), (int) (screenW * CLIP_W_FRAC));
+    }
+
+    /** Coalesce the re-measure a keystroke triggers - one per burst, not one per char. */
+    private void scheduleClipFit() {
+        if (clipFitPosted || clipPanel == null) return;
+        clipFitPosted = true;
+        ui.postDelayed(new Runnable() {
+            @Override public void run() { clipFitPosted = false; fitClipPanel(); }
+        }, 150L);
+    }
+
+    /**
+     * Size the modal to its text: 70% of the screen wide, as tall as the text needs up to
+     * a cap (past that the textarea scrolls), then centred.
+     */
+    private void fitClipPanel() {
+        if (clipPanel == null || clipEdit == null || clipPanelLp == null) return;
+        int w = clipPanelWidth();
+        int textW = w - dp(20);
+        int textH = clipTextHeight(clipEdit.getText(), textW,
+                (int) (screenH * CLIP_TEXT_MAX_H_FRAC));
+        LinearLayout.LayoutParams slp = (LinearLayout.LayoutParams) clipScroll.getLayoutParams();
+        if (slp != null) {
+            slp.height = textH;
+            clipScroll.setLayoutParams(slp);
+        }
+        int total = dp(34) + textH + dp(20) + dp(28) + dp(46);
+        total = Math.min(total, (int) (screenH * 0.92f));
+        clipPanelLp.width = w;
+        clipPanelLp.height = total;
+        clipPanelLp.x = Math.max(0, (screenW - w) / 2);
+        clipPanelLp.y = Math.max(0, (screenH - total) / 2);
+        try { wm.updateViewLayout(clipPanel, clipPanelLp); } catch (Exception ignored) {}
+    }
+
+    /** Lay the text out off-screen to learn the height the textarea wants. */
+    private int clipTextHeight(CharSequence text, int widthPx, int maxPx) {
+        if (text == null) text = "";
+        TextPaint tp = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        tp.setTextSize(clipEdit.getTextSize());
+        tp.setTypeface(clipEdit.getTypeface());
+        StaticLayout sl = StaticLayout.Builder
+                .obtain(text, 0, text.length(), tp, Math.max(dp(40), widthPx))
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setIncludePad(false)
+                .build();
+        return Math.max(dp(48), Math.min(sl.getHeight() + dp(16), maxPx));
+    }
+
+    private String clipStateLine() {
+        String t = (clipEdit == null) ? "" : clipEdit.getText().toString();
+        int lines = 1;
+        for (int i = 0; i < t.length(); i++) {
+            if (t.charAt(i) == '\n') lines++;
+        }
+        return "clip panel=" + (clipVisible ? "shown" : "hidden")
+                + " ready=" + onOff(clipReady)
+                + " junk=" + onOff(clipCleanJunk)
+                + " join=" + onOff(clipJoinLines)
+                + " lines=" + lines
+                + " chars=" + t.length();
+    }
+
     private void buildTasksBubble() {
         if (!showTasksBubble) { tasksBubble = null; return; }
         final int size = dp(44);
@@ -4940,11 +5551,15 @@ public class TrackpadService extends AccessibilityService {
         controlsRows.addView(sectionLabel("DOTS"));
         controlsRows.addView(controlRow("Show the \u2328 keys dot", showKeysBubble,
                 new View.OnClickListener() {
-                    @Override public void onClick(View v) { tick(); setBubbleShown(true, !showKeysBubble); }
+                    @Override public void onClick(View v) { tick(); setBubbleShown("keys", !showKeysBubble); }
                 }));
         controlsRows.addView(controlRow("Show the \u25A4 windows dot", showTasksBubble,
                 new View.OnClickListener() {
-                    @Override public void onClick(View v) { tick(); setBubbleShown(false, !showTasksBubble); }
+                    @Override public void onClick(View v) { tick(); setBubbleShown("tasks", !showTasksBubble); }
+                }));
+        controlsRows.addView(controlRow("Show the \u2702 clipboard dot", showClipBubble,
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { tick(); setBubbleShown("clip", !showClipBubble); }
                 }));
 
         controlsRows.addView(sectionLabel("SCROLLING"));
@@ -5029,16 +5644,25 @@ public class TrackpadService extends AccessibilityService {
      * One setter per change, each rebuilding, so a panel row and the `bubbles` op cannot
      * drift apart - the op just calls this once per dot it changes.
      */
-    private void setBubbleShown(boolean keys, boolean on) {
-        if (keys) {
+    private void setBubbleShown(String dot, boolean on) {
+        if ("keys".equals(dot)) {
             showKeysBubble = on;
             prefs.edit().putBoolean(PREF_SHOW_KEYS_BUBBLE, on).apply();
-        } else {
+        } else if ("tasks".equals(dot)) {
             showTasksBubble = on;
             prefs.edit().putBoolean(PREF_SHOW_TASKS_BUBBLE, on).apply();
+        } else if ("clip".equals(dot)) {
+            showClipBubble = on;
+            prefs.edit().putBoolean(PREF_SHOW_CLIP_BUBBLE, on).apply();
+            // switching it on should show it, not leave it waiting for the next copy
+            if (on) clipReady = true;
+        } else {
+            Log.w(TAG, "setBubbleShown: unknown dot '" + dot + "'");
+            return;
         }
         applyTheme();
-        Log.i(TAG, "bubbles -> keys=" + showKeysBubble + " windows=" + showTasksBubble);
+        Log.i(TAG, "bubbles -> keys=" + showKeysBubble + " windows=" + showTasksBubble
+                + " clip=" + showClipBubble);
     }
 
     /**

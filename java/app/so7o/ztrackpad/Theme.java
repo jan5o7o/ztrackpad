@@ -46,6 +46,7 @@ final class Theme {
     int bubbleDisplay;
     int bubbleTheme;      // the dot that opens the theme menu
     int bubbleTasks;      // the dot that opens the floating-window list
+    int bubbleClip;       // the dot that opens the clipboard modal (herdr amber)
     int bubbleControls;   // the gear that opens the controls panel
 
     // panels
@@ -107,6 +108,7 @@ final class Theme {
         DEFAULT.bubbleDisplay = 0xFFFFB300;
         DEFAULT.bubbleTheme = 0xFFB388FF;
         DEFAULT.bubbleTasks = 0xFF4DD0E1;
+        DEFAULT.bubbleClip = 0xFFFFD54F;
         DEFAULT.bubbleControls = 0xFFB0BEC5;
         DEFAULT.panelSolid = 0xF2000000;
         DEFAULT.panelStroke = 0x66FFFFFF;
@@ -146,6 +148,7 @@ final class Theme {
         DARK.bubbleDisplay = 0xFFE0A030;
         DARK.bubbleTheme = 0xFFC09BFF;
         DARK.bubbleTasks = 0xFF4DD0E1;
+        DARK.bubbleClip = 0xFFE0A030;
         DARK.bubbleControls = 0xFFB0BEC5;
         DARK.panelSolid = 0xFF0B0B0F;
         DARK.panelStroke = 0x40FFFFFF;
@@ -185,6 +188,7 @@ final class Theme {
         LIGHT.bubbleDisplay = 0xFFB26A00;
         LIGHT.bubbleTheme = 0xFF6A1FB0;
         LIGHT.bubbleTasks = 0xFF00695C;
+        LIGHT.bubbleClip = 0xFF8A5A00;
         LIGHT.bubbleControls = 0xFF546E7A;
         LIGHT.panelSolid = 0xF2FFFFFF;
         LIGHT.panelStroke = 0x33000000;
@@ -225,6 +229,7 @@ final class Theme {
         CONTRAST.bubbleDisplay = 0xFFFFC400;
         CONTRAST.bubbleTheme = 0xFFD0A0FF;
         CONTRAST.bubbleTasks = 0xFF00E5FF;
+        CONTRAST.bubbleClip = 0xFFFFC400;
         CONTRAST.bubbleControls = 0xFFFFFFFF;
         CONTRAST.panelSolid = 0xFF000000;
         CONTRAST.panelStroke = 0xFFFFFFFF;
@@ -264,6 +269,7 @@ final class Theme {
         GLASS.bubbleDisplay = 0xE6FFFFFF;
         GLASS.bubbleTheme = 0xE6FFFFFF;
         GLASS.bubbleTasks = 0xE6FFFFFF;
+        GLASS.bubbleClip = 0xE6FFFFFF;
         GLASS.bubbleControls = 0xE6FFFFFF;
         GLASS.panelSolid = 0x14000000;
         GLASS.panelStroke = 0x26FFFFFF;

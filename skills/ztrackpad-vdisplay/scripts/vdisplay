@@ -19,6 +19,10 @@
 #   vdisplay lock on|off|toggle   # freeze the pad against moving and resizing
 #   vdisplay flick on|off         # edge strips bank the gesture, scroll on release
 #   vdisplay marks on|off          # dotted lines where the edge scroll strips are
+#   vdisplay clip [op]             # clipboard modal: show|hide|toggle|read|clean|copy
+#   vdisplay clip junk on|off      # what `clean` strips (terminal artifacts)
+#   vdisplay clip join on|off      # what `clean` joins (line breaks -> spaces)
+#   vdisplay clip-set '<text>'     # put text on the system clipboard (fires the dot)
 #
 # ztrackpad must be running with its accessibility service enabled and Shizuku
 # granted: it owns the overlay windows and the Shizuku binding, so this only pokes it
@@ -68,6 +72,23 @@ if [ "$op" = "keys" ] && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
     spec="$1"
     shift
 fi
+# `clip-set` is sugar for `clip` + `set` with the text in `spec`.
+if [ "$op" = "clip-set" ]; then
+    op=clip
+    spec="${1:-}"
+    arg=set
+    shift 2>/dev/null || true
+fi
+# `clip <action> [value]`: the action in `arg`, and the value in `spec` for the two
+# options that take one (junk/join on|off).
+if [ "$op" = "clip" ] && [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
+    arg="$1"
+    shift
+    if [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
+        spec="$1"
+        shift
+    fi
+fi
 if { [ "$op" = "lock" ] || [ "$op" = "launch" ] || [ "$op" = "target" ] \
         || [ "$op" = "flick" ] || [ "$op" = "marks" ] \
         || [ "$op" = "press" ] || [ "$op" = "taskfocus" ]; } \
@@ -108,7 +129,7 @@ while [ $i -le "$n" ]; do
 done
 
 case "$op" in
-    status|create|show|hide|destroy|keys|keys-reset|lock|flick|marks|launch|target|shot|tap|type|press|tasks|taskfocus) ;;
+    status|create|show|hide|destroy|keys|keys-reset|lock|flick|marks|launch|target|shot|tap|type|press|tasks|taskfocus|clip) ;;
     *) echo "vdisplay: unknown op '$op'" >&2; usage 1 ;;
 esac
 

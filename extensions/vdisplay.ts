@@ -60,7 +60,11 @@ const vdisplayTool = defineTool({
 		"the same Shizuku path as the pad, so they drive the app on the display, not the " +
 		"phone under it. 'hide' drops the window while keeping the display and its apps " +
 		"running, 'show' brings it back, and 'destroy' releases the " +
-		"display and whatever was running on it. Requires ztrackpad's accessibility " +
+		"display and whatever was running on it. 'clip' drives the clipboard modal: with " +
+		"no action it reads the state back, show/hide/toggle the panel, read the system " +
+		"clipboard into it, clean the text with the terminal-artifact Cleaner, copy the " +
+		"text back to the clipboard (the modal then closes), or set the clipboard to the " +
+		"text in `text`. Requires ztrackpad's accessibility " +
 		"service plus Shizuku, and an adb connection.",
 	parameters: Type.Object({
 		op: Type.Union(
@@ -76,6 +80,7 @@ const vdisplayTool = defineTool({
 				Type.Literal("tap"),
 				Type.Literal("type"),
 				Type.Literal("press"),
+				Type.Literal("clip"),
 			],
 			{ description: "Which action to perform." },
 		),
@@ -130,13 +135,25 @@ const vdisplayTool = defineTool({
 		text: Type.Optional(
 			Type.String({
 				description:
-					"For op=type only: the whole text to type into the focused field, spaces included.",
+					"For op=type: the whole text to type into the focused field, spaces included. For op=clip with clipAction=set: the text to put on the clipboard.",
 			}),
 		),
 		key: Type.Optional(
 			Type.String({
 				description:
 					"For op=press only: one keycode - any KeyEvent name (ENTER, ESC, dpad_up, ...) or a raw integer.",
+			}),
+		),
+		clipAction: Type.Optional(
+			Type.String({
+				description:
+					"For op=clip: show|hide|toggle|read|clean|copy|junk|join the clipboard modal, or 'set' to put the text in `text` on the system clipboard. No value reads the state back.",
+			}),
+		),
+		clipValue: Type.Optional(
+			Type.String({
+				description:
+					"For op=clip with clipAction=junk or join: on|off.",
 			}),
 		),
 	}),
@@ -155,6 +172,18 @@ const vdisplayTool = defineTool({
 		}
 		if (params.op === "type" && params.text) extra.push(params.text);
 		if (params.op === "press" && params.key) extra.push(params.key);
+		// `clip set` is sugar for the script's `clip-set <text>`.
+		if (params.op === "clip" && params.clipAction === "set") {
+			const status = await vdisplay("clip-set", [params.text ?? ""]);
+			return {
+				content: [{ type: "text", text: status }],
+				details: { op: "clip", status, params },
+			};
+		}
+		if (params.op === "clip" && params.clipAction) {
+			extra.push(params.clipAction);
+			if (params.clipValue) extra.push(params.clipValue);
+		}
 		const status = await vdisplay(params.op, extra);
 		return {
 			content: [{ type: "text", text: status }],

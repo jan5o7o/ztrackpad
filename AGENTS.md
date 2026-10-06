@@ -57,12 +57,18 @@ adb install -r out/ztrackpad.apk
 ```
 
 `tests/smoke.sh` covers everything that can be checked without fingers: adb device and
-package discovery, `shizuku=ready`, the 8-field status schema, the keys-layout and pad-lock
-round-trips (both restored to their prior value afterwards) and the implicit-broadcast trap.
-The virtual-display lifecycle is off by default because it has a visible side effect:
-`tests/smoke.sh --with-display`. Run it after installing, against whatever is installed —
-it discovers the package id instead of hardcoding one, so it needs no renaming in the public
-tree.
+package discovery, `shizuku=ready`, the status schema, the keys-layout, pad-lock, flick and
+scroll-mark round-trips (all restored to their prior value afterwards), the three-dot
+`bubbles` round-trip and the implicit-broadcast trap. Two lifecycles are off by default
+because they have side effects: `tests/smoke.sh --with-display` (a visible display) and
+`--with-clip` (which CLOBBERS THE SYSTEM CLIPBOARD - it is the only way to exercise the
+clipboard modal end to end, so it is opt-in). Run it after installing, against whatever is
+installed - it discovers the package id instead of hardcoding one, so it needs no renaming in
+the public tree. Pass the package id explicitly (`tests/smoke.sh app.so7o.ztrackpad`) when a
+second trackpad build is installed, or discovery refuses to guess between them.
+
+`tests/cleaner.sh` is separate and needs no device: `Cleaner` is pure Java, so it compiles
+and runs with plain `javac`/`java` (34 checks). Run it after touching any cleaning rule.
 
 Signing needs the keystore password, which is **deliberately not in the repo**: set
 `KSPASS` in the environment, or keep it in `~/.ztrackpad-kspass`. `build.sh` fails
@@ -83,6 +89,7 @@ closed when neither is present.
 | `java/.../ShizukuInputHandler.java` | client side: permission, bind user service, wrappers |
 | `java/.../VDisplayReceiver.java` | broadcast entry point so scripts can create/show/hide/destroy the virtual display |
 | `java/.../Theme.java` | the five visual presets and every themed colour/radius |
+| `java/.../Cleaner.java` | the clipboard text transform (terminal artifacts -> clean text). **Pure java, no android imports**, so `tests/cleaner.sh` runs it without the platform jar |
 | `skills/ztrackpad-vdisplay/` | pi skill + `scripts/vdisplay` for driving it from Termux |
 | `skills/ztrackpad-vdisplay-launch/` | pi skill for putting an app on that display and verifying it from pixels |
 | `extensions/vdisplay.ts` | pi extension exposing that script as a `vdisplay` tool |
@@ -122,7 +129,13 @@ size), `show`, `hide`, `destroy`, `keys`
 edge strips between live scrolling and Lite's bank-and-scroll-on-release feel, through the
 same `setFlickScroll` the CONTROLS row uses. `marks` (`--es arg on|off`) is its cosmetic
 twin: whether the pad draws the dotted edge-strip markers, through the same
-`setShowScrollMarks` the CONTROLS row uses. `tasks` (no arg) lists
+`setShowScrollMarks` the CONTROLS row uses. `clip` is the clipboard modal: no arg reads its
+state back (`panel=`, `ready=`, `junk=`, `join=`, `lines=`, `chars=`), `--es arg
+show|hide|toggle` opens and closes it, `read` pulls the system clipboard into the textarea,
+`clean` runs the ticked transforms, `junk on|off` and `join on|off` set the two checkboxes,
+`copy` writes the text back and closes, and `--es arg set --es spec '<text>'` puts text on the
+clipboard.
+`tasks` (no arg) lists
 the floating ("pop-up view") windows on the display the panels live on, and with
 `--es arg show|hide|toggle` drives the panel that lists them; `taskfocus --es arg <TASK_ID>`
 brings one to the front. `tasks` replies `ok tasks n=<count> display=<d>` followed by
@@ -270,6 +283,42 @@ pixels to composite, so it fails cleanly.
   place instead, since their positions are not persisted.
 - `Theme.DEFAULT` mirrors the original hardcoded values exactly. Keep it that way: it is
   the regression test, and it is verifiable by eye.
+- **The clipboard modal is the one focusable window, and it has to be.** Android only lets an
+  app read the clipboard when it owns the focused window
+  (`ClipboardService.clipboardAccessAllowed` -> `WindowManagerInternal.isUidFocused`); there is
+  no accessibility-service exemption, and shell cannot read it either (measured: `dumpsys
+  clipboard` prints nothing and there is no `cmd clipboard`). So the `✂` modal takes focus
+  while it is open - which is also what lets the keys panel type into its textarea - and hands
+  focus back when it closes.
+- **A focusable window must set `FLAG_NOT_TOUCH_MODAL`.** A focusable window without it is
+  modal and swallows every touch outside its own bounds, which silently killed the `✂` dot
+  while the modal was open (measured at points well clear of the panel). The modal also sets
+  `FLAG_LAYOUT_NO_LIMITS` like the other panels.
+- **`OnPrimaryClipChangedListener` only delivers to a focused app**, so the dot cannot
+  "appear on copy" from the background: the callback never arrives while the overlays are
+  unfocused and fires the moment the modal takes focus (measured both ways). The dot is
+  therefore always present when enabled, the text is read when the modal opens, and
+  `clipready=` reports whether a delivery has ever been seen.
+- **The modal's height is measured, not guessed** (`clipTextHeight` lays the text out with a
+  `StaticLayout`, `fitClipPanel` sizes the window): an overlay window has a fixed height, and
+  the requirement is 70% of the screen wide and as tall as the text needs, capped at
+  `CLIP_TEXT_MAX_H_FRAC` (past that the textarea scrolls), then centred. A keystroke only
+  re-measures through a debounce (`scheduleClipFit`), not on every character.
+- **The keyboard stays down until the textarea is tapped**
+  (`SOFT_INPUT_STATE_ALWAYS_HIDDEN`), so opening the modal never shoves a keyboard over the
+  screen; the modal is centred, so the keyboard does not cover it when it does appear.
+  Disabling the IME instead (`FLAG_ALT_FOCUSABLE_IM` + `setShowSoftInputOnFocus(false)`) was
+  the first cut and it left no way to type at all - do not go back to it.
+- **`Cleaner` must stay android-free.** It is the tested transform, and `tests/cleaner.sh`
+  compiles it with plain `javac`; an `android.*` import there breaks that test silently. New
+  junk class = new named static method + a case in `tests/CleanerTest.java`.
+- **What `clean` does is two persisted checkboxes, not a fixed pipeline**: `clean junk`
+  (`Cleaner.clean`) and `remove new lines` (`joinClipLines` - every `\n` becomes a space, runs
+  of spaces collapse to one, then trim). Neither is applied on open: the raw copy is what you
+  are shown, and cleaning stays an explicit press. `joinClipLines` eats indentation, which is
+  exactly why it is a checkbox and not the default; the guarded unwrap stays on the long-press
+  of `clean`. Both prefs are read in `onServiceConnected` and written by the same setters the
+  `clip junk|join` ops call, so a finger and a script cannot disagree.
 - Displays: **never persist a display id** — they are reused (`Overlay #1` is id 7
   on this device, not 2). Persist `displayKey()` = name + *physical mode size*
   (physical rather than `getWidth()` so rotation does not change the key, and size
@@ -490,6 +539,30 @@ this list honest — do not move rows up without actually re-testing.
   `create floating display` created a single display
   (`virtual display created: 12 (surface-backed)`), SurfaceFlinger reported exactly one
   `ztrackpad` virtual display, and the Calculator rendered cleanly in the top half.
+
+- **Clipboard modal, end to end** (`tests/smoke.sh --with-clip`, 2026-10-06): a 140-byte
+  junk specimen (ANSI + pane title bar + zellij gutter + padded columns) went onto the
+  clipboard, `clip show` read it back (112 chars - the focusable window reads), `clip clean`
+  took it to 67, `clip copy` closed the modal, and re-opening read the 67-char cleaned text
+  back, so the write-back landed. `tests/cleaner.sh` passes 34 checks in Termux with no
+  device at all.
+- **The `clean` checkboxes work and persist**, measured: `clip junk off` + `clip join on`
+  flattened the cleaned 4-line specimen to 1 line (`lines=4 -> 1`), and `clip junk on`
+  stripped 112 chars to 67. The smoke test pins and restores both options, because they are
+  persisted - an earlier run's `join on` leaked into the next run and made the flatten check
+  read `1 -> 1`.
+- **The modal's geometry is exact**, measured from `dumpsys window`: the panel is
+  `(272,877)(1268x422)` on a 1812x2176 display (1268 = 0.7 x 1812, centred) and the `✂` dot is
+  `(18,1414)(99x99)` = `dp(8)` / 0.65 x 2176 / `dp(44)`.
+- **Editing works from both inputs**: `vdisplay type XYZ` - the same Shizuku key path the keys
+  panel uses - took the textarea from 87 to 90 chars, and tapping the textarea made the system
+  keyboard visible (`mViewVisibility=0x0`) while opening the modal alone left it hidden
+  (`0x8`).
+- **The `✂` dot toggles the modal both ways**, measured with `input tap` on it at `(67,1464)`:
+  hidden -> shown and shown -> hidden (the second only after `FLAG_NOT_TOUCH_MODAL` was added).
+- **The clipboard listener is focus-gated**, confirmed both ways: unfocused, a clipboard write
+  produced no callback (`clipready=off`); with the modal focused, the same write logged
+  `clipboard changed (focused)`.
 
 **Implemented, verified mechanically, NOT visually confirmed**
 

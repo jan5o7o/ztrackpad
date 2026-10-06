@@ -11,6 +11,60 @@ it can only ever describe the app as shipped.
 
 Nothing yet.
 
+## 0.8.0 — 2026-10-06
+
+### Features
+
+- **Clipboard modal** (`✂` dot, and CONTROLS > DOTS has the switch for it). It reads the
+  system clipboard into an editable textarea and offers **clean**, **copy** and **cancel**.
+  Two checkboxes say what **clean** does, and both are remembered:
+  - **clean junk** runs the terminal-artifact cleaner over the text — ANSI escapes,
+    box-drawing pane borders and title bars, zellij line gutters, control characters,
+    zero-width and bidi marks, exotic spaces, the padding a `\r` redraw leaves — and never
+    touches code indentation.
+  - **remove new lines** turns every line break into a space and collapses the runs that
+    leaves, so a wrapped paste comes out as one line.
+
+  **copy** writes the result back to the clipboard so it can be pasted straight into Termux,
+  and closes. Hold **clean** to also unwrap terminal-wrapped lines (the guarded join; blunter
+  than it sounds, hence the hidden long-press). The modal is 70% of the screen wide and as
+  tall as its text needs, up to a cap (past that the textarea scrolls), and it is centred so a
+  keyboard never covers it. Tap the text to edit it with the system keyboard; the keys panel
+  types into it too.
+- The cleaner itself is a **pure-Java class with no Android imports**, so `tests/cleaner.sh`
+  compiles and runs it with plain `javac`/`java` — no platform jar, 34 checks. The same file
+  is what the modal calls, so the tested transform and the shipped one cannot drift.
+- **Scriptable**: `vdisplay clip [show|hide|toggle|read|clean|copy|junk on|off|join on|off]`,
+  plus `clip-set '<text>'` to put text on the clipboard. `status` gained `clip=`, `clipdot=`
+  and `clipready=`; the `clip` reply also carries `junk=`, `join=`, `lines=` and `chars=`, and
+  `bubbles` now also takes `clip=on|off`.
+
+### Notes
+
+- **The dot does not "appear on copy", and it cannot.** Android delivers
+  `OnPrimaryClipChangedListener` only to an app that owns the focused window, and reading the
+  clipboard needs that same focus — there is no accessibility-service exemption, and shell
+  cannot read it either. So the `✂` dot is always present when enabled, and the clipboard is
+  read when the modal opens, which is when the window does hold focus. Both facts were
+  measured on the device, not assumed.
+- The modal is ztrackpad's **one focusable window**. That is what makes the read work and what
+  lets the keys panel type into the textarea; it closes back to whatever was underneath. It
+  carries `FLAG_NOT_TOUCH_MODAL` because a focusable window without it is modal and swallows
+  every touch outside its own bounds — which silently killed the dot while the modal was open.
+
+### Extension
+
+- The `vdisplay` pi extension gained `op=clip` (with a `clipAction`, and `clipAction=set`
+  taking the text), so an agent can drive the modal as well as the display.
+
+### Tests
+
+- `tests/smoke.sh --with-clip` drives the whole modal end to end: set a junk specimen, open,
+  read, clean, copy, and read the clipboard back; then the two checkboxes (junk/join round-trip,
+  and `remove new lines` flattening 4 lines to 1). Off by default because it clobbers the
+  system clipboard, and it pins and restores the two persisted options. The `bubbles`
+  round-trip now covers all three dots.
+
 ## 0.7.0 — 2026-10-04
 
 
