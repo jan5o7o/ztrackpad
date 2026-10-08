@@ -22,8 +22,8 @@ is `~/pocketjs-termux/` (its README carries the state an agent inherits) and the
 The plan is that **this app becomes the shell** — input, displays, windows, capture — and PocketJS
 becomes what the panels are written in. Nothing in this repo implements that yet.
 
-- Write-ups: `~/ideas/brainstorms/2026-10-08-ztrackpad-pocketjs-feasibility.md` (the decision, the
-  build attempt, the one linker fix) and `…-shell-pocketjs-userspace.md` (what to build on it).
+- The write-ups (the decision, the build attempt, the linker fix, and what to build on it) live in
+  the local private archive, not in this repo.
 - **Done when** a PocketJS surface renders inside a `TYPE_ACCESSIBILITY_OVERLAY` window owned by
   `TrackpadService` rather than an Activity, click-through still reaches the app underneath, and one
   `shell.*` call returns shell data to guest JS.
