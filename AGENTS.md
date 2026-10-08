@@ -12,6 +12,28 @@ Reference environment — everything the verification list below was measured on
 Nothing in the build is device-specific, so another host with the same tools should work;
 read "verified working" at the end of this file as *on that device*.
 
+## A PocketJS direction (2026-10-08)
+
+The UI-layer work that follows this app is **PocketJS** — a JSX/QuickJS UI framework whose Android
+host is built without Gradle, the way `build.sh` is. It builds *on this device*: the local shim kit
+is `~/pocketjs-termux/` (its README carries the state an agent inherits) and the checkout is
+`~/pocketjs` at `5a60ab9`.
+
+The plan is that **this app becomes the shell** — input, displays, windows, capture — and PocketJS
+becomes what the panels are written in. Nothing in this repo implements that yet.
+
+- Write-ups: `~/ideas/brainstorms/2026-10-08-ztrackpad-pocketjs-feasibility.md` (the decision, the
+  build attempt, the one linker fix) and `…-shell-pocketjs-userspace.md` (what to build on it).
+- **Done when** a PocketJS surface renders inside a `TYPE_ACCESSIBILITY_OVERLAY` window owned by
+  `TrackpadService` rather than an Activity, click-through still reaches the app underneath, and one
+  `shell.*` call returns shell data to guest JS.
+- **Stop if** the port needs more than a backend swap. The single global `ui_*` tree and the host's
+  `static` state are the likely reasons. The fallbacks are already measured: a QuickJS wrapper AAR
+  (`io.github.taoweiji.quickjs:quickjs-android`, 1.4 MB, Java API) for scripted logic, or the
+  existing WebView shell for content.
+- Anything vendored from it (PocketJS and QuickJS are MIT) needs an entry in
+  `THIRD_PARTY_LICENSES.md`.
+
 ## Branches and releases
 
 `main` is **releases only**: a pull request is required, the `build` check has to pass, and
